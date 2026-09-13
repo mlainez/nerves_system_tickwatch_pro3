@@ -49,7 +49,14 @@ CONFIG_FONT_TER16x32=y
 
 # Module signing buys nothing here: the modules ship inside a read-only
 # squashfs that fwup writes as one image, and the signing key would be
-# generated fresh on every build, breaking reproducibility.
+# generated fresh on every build, which defeats BR2_REPRODUCIBLE.
+#
+# Turning it off means turning off the lockdown LSM, which is what pulls
+# it in (`select MODULE_SIG if MODULES` in security/lockdown/Kconfig).
+# Lockdown does nothing on this watch in any case: it gates on secure
+# boot or an explicit lockdown= parameter, and neither exists here.
+# CONFIG_SECURITY_LOCKDOWN_LSM is not set
+# CONFIG_SECURITY_LOCKDOWN_LSM_EARLY is not set
 # CONFIG_MODULE_SIG is not set
 
 # Compressed modules need a kmod built with the matching decompressor.
