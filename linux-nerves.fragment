@@ -1,0 +1,58 @@
+# Kernel config fragment for nerves_system_tickwatch_pro3.
+#
+# The base config is linux-7.1.defconfig, taken verbatim from
+# postmarketOS's linux-postmarketos-qcom-msm89x7 (config-postmarketos-
+# qcom-msm89x7.aarch64). That config is the known-good one for this SoC
+# family, so keeping it unmodified and expressing our deltas here means a
+# pmaports refresh is a file copy rather than a merge.
+#
+# Buildroot merges this on top and runs `olddefconfig`, so anything whose
+# dependencies are unmet is dropped rather than breaking the build.
+
+# --- Mounted before the rootfs exists, so it cannot be a module --------------
+#
+# postmarketOS boots via an initramfs that carries kernel modules and
+# modprobes what it needs. This system's initramfs deliberately carries
+# none: the cpio has to fit, with the kernel and the DTB, inside the
+# 50 MiB of boot memory lk2nd gives us. So everything on the path to
+# `switch_root` is built in instead.
+#
+# squashfs is the rootfs itself; ext2 is the boot subpartition erlinit
+# mounts at /boot; f2fs is the application-data subpartition.
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_LZ4=y
+CONFIG_EXT2_FS=y
+CONFIG_F2FS_FS=y
+
+# The initramfs raises the USB gadget before switch_root so that a failed
+# boot still answers on usb0 with telnetd. Built in for the same reason.
+CONFIG_USB_CONFIGFS=y
+
+# Input is how you interact with a watch; no reason to defer it.
+CONFIG_INPUT_EVDEV=y
+
+# --- Console -----------------------------------------------------------------
+#
+# fbcon on a 454x454 panel with the default 8x16 font is unreadable at arm's
+# length. extlinux.conf asks for fbcon=font:TER16x32, which needs the font
+# compiled in.
+CONFIG_FONTS=y
+CONFIG_FONT_TER16x32=y
+
+# --- Toolchain ---------------------------------------------------------------
+#
+# postmarketOS builds this kernel with clang (LLVM=1); Nerves builds it with
+# the GCC 15 aarch64 toolchain. Shadow call stack is a clang-only arm64
+# feature — olddefconfig would drop it anyway once CC_HAVE_SHADOW_CALL_STACK
+# goes unmet, but saying so here documents why it disappears.
+# CONFIG_SHADOW_CALL_STACK is not set
+
+# Module signing buys nothing here: the modules ship inside a read-only
+# squashfs that fwup writes as one image, and the signing key would be
+# generated fresh on every build, breaking reproducibility.
+# CONFIG_MODULE_SIG is not set
+
+# Compressed modules need a kmod built with the matching decompressor.
+# Nerves' kmod is not, so a compressed module is one that silently fails
+# to load.
+# CONFIG_MODULE_COMPRESS is not set

@@ -1,0 +1,25 @@
+config BR2_PACKAGE_TICWATCH_PRO3_FIRMWARE
+	bool "ticwatch-pro3-firmware [TicWatch Pro 3]"
+	select BR2_PACKAGE_LINUX_FIRMWARE
+	select BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX
+	help
+	  Wi-Fi and Bluetooth firmware plumbing for the Broadcom
+	  BCM43430A1 in the TicWatch Pro 3.
+
+	  Two halves, because they come from different places:
+
+	  The chip firmware itself is redistributable and comes from
+	  linux-firmware. Upstream ships it as cypress/cyfmac43430-sdio.bin
+	  with brcm/brcmfmac43430-sdio.bin as a symlink; Buildroot installs
+	  the real file but not the symlink, so this package adds it.
+
+	  The calibration data does not come from linux-firmware. The Wi-Fi
+	  NVRAM and the Bluetooth patch RAM image are specific to the board
+	  — in the NVRAM's case, to the individual watch, since it carries
+	  the MAC address — and live on the stock Android partitions. They
+	  cannot be shipped here. ticwatch-firmware-setup finds them at boot
+	  on the read-only /mnt/vendor and /mnt/persist mounts and presents
+	  them under the names brcmfmac and hci_bcm ask for.
+
+	  Without the NVRAM, brcmfmac will load and then fail to bring the
+	  interface up. See the README.

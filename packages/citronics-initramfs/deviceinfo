@@ -1,0 +1,35 @@
+# Citronics initramfs deviceinfo for the Mobvoi TicWatch Pro 3.
+#
+# The initramfs reads this file for USB-recovery details and
+# human-readable identification. The partitions it actually mounts are
+# resolved at boot — `nerves_base=` on the kernel command line names a GPT
+# partition, not a device node — so nothing here decides where the rootfs
+# comes from.
+
+deviceinfo_format_version="0"
+deviceinfo_name="Mobvoi TicWatch Pro 3"
+deviceinfo_manufacturer="Mobvoi"
+# Mobvoi's downstream codename for the LTE board. The GPS board is
+# `rubyfish` and is the same hardware with a modem-less SoC; one image
+# covers both, so one codename is recorded here.
+deviceinfo_codename="mobvoi-rover"
+deviceinfo_year="2020"
+deviceinfo_arch="aarch64"
+deviceinfo_chassis="watch"
+deviceinfo_keyboard="false"
+deviceinfo_external_storage="false"
+deviceinfo_screen_width="454"
+deviceinfo_screen_height="454"
+
+# USB gadget identifiers used by the initramfs's recovery USB-net.
+# Generic Google-of-Android IDs work for fastboot-style hosts. A product
+# should use its own.
+deviceinfo_usb_idVendor="0x18d1"
+deviceinfo_usb_idProduct="0xd001"
+deviceinfo_usb_serialnumber=""
+deviceinfo_usb_network_function="ncm.usb0"
+
+# unudhcpd hands the connected host a single static IP so you can telnet
+# into the initramfs over USB for recovery. Set to "true" to disable.
+deviceinfo_disable_dhcpd="false"
+deviceinfo_getty=""

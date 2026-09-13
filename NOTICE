@@ -1,0 +1,47 @@
+nerves_system_tickwatch_pro3
+Copyright 2026 Marc Lainez
+
+This product includes software developed as part of the Nerves Project
+(https://github.com/nerves-project), licensed under Apache-2.0.
+
+The files in this repository are licensed under Apache-2.0 unless a file
+says otherwise. A *built* firmware image is an aggregate of many separately
+licensed components, and building one downloads and, in places, executes
+third-party source that is not covered by this repository's license:
+
+  * Linux kernel — GPL-2.0 WITH Linux-syscall-note.
+    Built from https://github.com/msm89x7-mainline/linux, a fork of
+    mainline Linux. The kernel configuration in linux-7.1.defconfig is
+    copied verbatim from postmarketOS's pmaports
+    (linux-postmarketos-qcom-msm89x7), MIT.
+
+  * Buildroot and the packages it builds — many licenses. Run
+    `make legal-info` in the Buildroot output directory for the manifest
+    of what a given build actually included.
+
+  * citronics-initramfs — https://github.com/Citronics/initramfs.
+    See that project's LICENSE. The patches under
+    packages/citronics-initramfs are Apache-2.0 as part of this work.
+
+  * qbootctl — BSD-3-Clause, https://github.com/linux-msm/qbootctl
+  * unudhcpd — GPL-3.0, https://gitlab.postmarketos.org/postmarketOS/unudhcpd
+
+  * lk2nd — MIT AND BSD-3-Clause AND GPL-2.0-only,
+    https://github.com/msm8916-mainline/lk2nd. The `lk2nd.img` committed
+    here is a build of release 23.1 plus the device tree patch in
+    prebuilt/lk2nd. It is a binary redistribution of that project, not of
+    this one; see prebuilt/README.md for how to reproduce it.
+
+  * dtbo.img — from https://github.com/NekoCWD/mobvoi-rover-dtbo,
+    redistributed here for convenience. It contains no vendor code: it is
+    an empty device tree overlay.
+
+  * Broadcom BCM43430A1 Wi-Fi firmware — proprietary, redistributable
+    under the terms in linux-firmware's LICENCE.broadcom_bcm43xx. Fetched
+    at build time by Buildroot's linux-firmware package; not stored here.
+
+  * Wi-Fi NVRAM and Bluetooth patch RAM — proprietary, NOT redistributable
+    and NOT included. These are read at runtime from the stock Android
+    partitions on the watch itself. See packages/ticwatch-pro3-firmware.
+
+No Qualcomm or Mobvoi proprietary firmware is stored in this repository.

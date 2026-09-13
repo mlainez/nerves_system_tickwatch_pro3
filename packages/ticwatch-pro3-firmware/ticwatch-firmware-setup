@@ -1,0 +1,109 @@
+#!/bin/sh
+# Present the watch's own Wi-Fi and Bluetooth calibration data to the
+# kernel under the names its mainline drivers ask for.
+#
+# The BCM43430A1's chip firmware is generic and ships in the rootfs. Its
+# calibration data is not: the Wi-Fi NVRAM carries this watch's MAC
+# address, and both it and the Bluetooth patch RAM image live on the stock
+# Android partitions under names the downstream bcmdhd driver used. So
+# rather than copy anything into the image, mount those partitions
+# read-only, symlink what we find into a tmpfs under the names brcmfmac
+# and hci_bcm expect, and point the kernel's firmware loader at it.
+#
+# firmware_class.path is searched *before* /lib/firmware, so this
+# supplements the shipped firmware rather than replacing it.
+#
+# Run this before the brcmfmac or hci_uart modules are loaded. Exits 0 even
+# when it finds nothing: a watch with no Wi-Fi is still a working watch,
+# and the log says what was missing.
+
+set -u
+
+FWDIR=/run/firmware
+PARAM=/sys/module/firmware_class/parameters/path
+
+log() { echo "ticwatch-firmware-setup: $*"; }
+
+# brcmfmac builds the NVRAM filename from the device tree: it appends the
+# `brcm,board-type` property, or failing that the root node's compatible
+# string, to the chip name. Our device tree sets no board-type, so the
+# name it looks for is "brcmfmac43430-sdio.mobvoi,rover.txt" — and it
+# falls back to the bare "brcmfmac43430-sdio.txt". Provide both.
+NVRAM_NAMES="brcmfmac43430-sdio.mobvoi,rover.txt brcmfmac43430-sdio.txt"
+
+# What the stock firmware calls the same files. bcmdhd used .cal or
+# nvram.txt; the Android Bluetooth stack used a .hcd patch RAM image.
+NVRAM_CANDIDATES="bcmdhd.cal nvram.txt nvram_43430.txt bcmdhd_43430.cal nvram_mfg.txt"
+HCD_CANDIDATES="BCM43430A1.hcd bcm43430a1.hcd BCM4343A1.hcd"
+
+# Where Android tends to keep them. /persist is searched too because some
+# builds put the per-unit calibration there rather than on /vendor.
+SEARCH_DIRS="
+	/mnt/vendor/firmware
+	/mnt/vendor/etc/firmware
+	/mnt/vendor/etc/wifi
+	/mnt/vendor/firmware/wlan
+	/mnt/persist
+	/mnt/persist/firmware
+	/mnt/persist/wlan
+"
+
+find_file() {
+	# Look for any of $2... under the search dirs, shallowly first so an
+	# exact hit wins over a deep one.
+	for d in $SEARCH_DIRS; do
+		[ -d "$d" ] || continue
+		for n in $1; do
+			if [ -f "$d/$n" ]; then
+				echo "$d/$n"
+				return 0
+			fi
+		done
+	done
+	for d in $SEARCH_DIRS; do
+		[ -d "$d" ] || continue
+		for n in $1; do
+			f=$(find "$d" -maxdepth 3 -type f -name "$n" 2>/dev/null | head -n1)
+			if [ -n "$f" ]; then
+				echo "$f"
+				return 0
+			fi
+		done
+	done
+	return 1
+}
+
+mkdir -p "$FWDIR/brcm"
+
+found_any=0
+
+if nvram=$(find_file "$NVRAM_CANDIDATES"); then
+	log "Wi-Fi NVRAM: $nvram"
+	for n in $NVRAM_NAMES; do
+		ln -sf "$nvram" "$FWDIR/brcm/$n"
+	done
+	found_any=1
+else
+	log "no Wi-Fi NVRAM found; brcmfmac will load but the interface will not come up"
+	log "  looked for: $NVRAM_CANDIDATES"
+	log "  under: $(echo $SEARCH_DIRS | tr '\n' ' ')"
+fi
+
+if hcd=$(find_file "$HCD_CANDIDATES"); then
+	log "Bluetooth patch RAM: $hcd"
+	ln -sf "$hcd" "$FWDIR/brcm/BCM43430A1.hcd"
+	found_any=1
+else
+	log "no Bluetooth .hcd found; the controller will run unpatched firmware"
+fi
+
+if [ "$found_any" = "1" ]; then
+	if [ -w "$PARAM" ]; then
+		printf "%s" "$FWDIR" > "$PARAM"
+		log "firmware_class.path set to $FWDIR"
+	else
+		log "cannot write $PARAM — is CONFIG_FW_LOADER built in?"
+	fi
+fi
+
+exit 0

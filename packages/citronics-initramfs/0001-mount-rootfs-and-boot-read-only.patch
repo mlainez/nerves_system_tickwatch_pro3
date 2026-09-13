@@ -1,0 +1,31 @@
+From 84740d236e70b5b5d3c153be59d3acdf11216a81 Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Sun, 13 Sep 2026 10:15:15 +0200
+Subject: [PATCH] Mount rootfs and boot partitions read-only
+
+---
+ initramfs/usr/share/citronics-initramfs/functions.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/initramfs/usr/share/citronics-initramfs/functions.sh b/initramfs/usr/share/citronics-initramfs/functions.sh
+index 18c034e..b01b959 100755
+--- a/initramfs/usr/share/citronics-initramfs/functions.sh
++++ b/initramfs/usr/share/citronics-initramfs/functions.sh
+@@ -388,7 +388,7 @@ mount_rootfs() {
+     done
+ 
+     if [ -e "$rootfs_device" ]; then
+-        mount "$rootfs_device" /sysroot
++        mount -o ro "$rootfs_device" /sysroot
+     else
+         echo_kmsg "Device $rootfs_device not available after 10 seconds, cannot mount rootfs."
+     fi
+@@ -411,7 +411,7 @@ mount_boot_partition() {
+     done
+ 
+     if [ -e "$boot_partition_device" ]; then
+-        mount "$boot_partition_device" /sysroot/boot
++        mount -o ro "$boot_partition_device" /sysroot/boot
+     else
+         echo_kmsg "Device $boot_partition_device not available after 10 seconds, cannot mount boot partition."
+     fi

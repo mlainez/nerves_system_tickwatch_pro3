@@ -1,0 +1,13 @@
+# Add project-specific packages for Buildroot here
+#
+# If these are non-proprietary, please consider contributing them back to
+# Nerves or Buildroot.
+menu "Custom Packages"
+
+source "$NERVES_DEFCONFIG_DIR/packages/citronics-initramfs/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/qbootctl/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/reboot-mode/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/ticwatch-pro3-firmware/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/unudhcpd/Config.in"
+
+endmenu
