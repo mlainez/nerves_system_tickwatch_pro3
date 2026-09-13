@@ -179,17 +179,44 @@ payload gets close. It is also why the initramfs carries no kernel
 modules: everything on the path to `switch_root` is built into the kernel
 instead (see `linux-nerves.fragment`).
 
+## Driver bring-up
+
+Nerves has no init system — `erlinit` is PID 1 and starts the BEAM, and
+nothing else runs. There is no udev either, so nothing acts on the SDIO
+and serdev uevents that would normally autoload a driver. Left alone this
+watch boots to a working IEx prompt with no touchscreen, no Wi-Fi and no
+Bluetooth.
+
+`/usr/sbin/ticwatch-bringup` is the one place that ordering is expressed.
+`erlinit` runs it through `--pre-run-exec`, which happens after the `-m`
+mounts and before Erlang starts:
+
+1. find the Wi-Fi NVRAM and the Bluetooth patch RAM image on the stock
+   `/mnt/vendor` and `/mnt/persist` partitions
+2. symlink them into a tmpfs under the names `brcmfmac` and `btbcm` ask
+   for, and point `firmware_class.path` at it
+3. `modprobe zinitix brcmfmac hci_uart`
+
+The order is the point. The drivers cannot just be built into the kernel:
+the files they need live on a partition that is not mounted until erlinit
+mounts it, long after a built-in driver would have probed and failed.
+postmarketOS has the same constraint and solves it the same way, by
+ordering `msm-firmware-loader` ahead of module loading.
+
+The script always exits 0 — a missing blob costs you Wi-Fi, not a boot.
+Check `dmesg` for lines prefixed `ticwatch-bringup:` to see what it found.
+
 ## Known gaps
 
 - **Wi-Fi needs calibration data off your own watch.** The BCM43430A1's
   chip firmware ships in the rootfs, but its NVRAM does not — it carries
   the MAC address, so it is per-unit, and it lives on the stock Android
   partitions under the name the downstream `bcmdhd` driver used.
-  `ticwatch-firmware-setup` looks for it on the read-only `/mnt/vendor`
-  and `/mnt/persist` mounts at boot and presents it under the name
-  `brcmfmac` expects. If it finds nothing it says so in the log, and the
-  interface will load but not come up. The same applies to the Bluetooth
-  `.hcd` patch RAM image.
+  `ticwatch-bringup` looks for it on the read-only `/mnt/vendor` and
+  `/mnt/persist` mounts at boot and presents it under the name `brcmfmac`
+  expects. If it finds nothing it says so in the log, and the interface
+  will load but not come up. The same applies to the Bluetooth `.hcd`
+  patch RAM image.
 - **No GPU.** There is no KMS driver for this panel — mainline has no
   panel driver for it, so the device tree hands the kernel the
   framebuffer lk2nd set up and SimpleDRM binds it. That means no

@@ -24,8 +24,8 @@ define TICWATCH_PRO3_FIRMWARE_INSTALL_TARGET_CMDS
 	ln -sf ../cypress/cyfmac43430-sdio.clm_blob \
 		$(TARGET_DIR)/lib/firmware/brcm/brcmfmac43430-sdio.clm_blob
 
-	$(INSTALL) -D -m 0755 $(@D)/ticwatch-firmware-setup \
-		$(TARGET_DIR)/usr/sbin/ticwatch-firmware-setup
+	$(INSTALL) -D -m 0755 $(@D)/ticwatch-bringup \
+		$(TARGET_DIR)/usr/sbin/ticwatch-bringup
 endef
 
 $(eval $(generic-package))

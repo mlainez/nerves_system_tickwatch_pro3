@@ -1,6 +1,25 @@
 #!/bin/sh
-# Present the watch's own Wi-Fi and Bluetooth calibration data to the
-# kernel under the names its mainline drivers ask for.
+# Bring up the hardware that needs firmware staged first.
+#
+# Nerves has no init system: erlinit is PID 1 and starts the BEAM. Nothing
+# else runs, so this script is the one place where the ordering below is
+# expressed. erlinit calls it through --pre-run-exec (see
+# /etc/erlinit.config), which runs after the -m mounts are in place and
+# before Erlang starts.
+#
+# Order matters and is the whole point:
+#
+#   1. stage the calibration data off the stock Android partitions
+#   2. point the kernel firmware loader at it
+#   3. only then load the drivers that will ask for it
+#
+# Get that backwards and brcmfmac asks for its NVRAM before it exists,
+# gets nothing, and the interface never comes up. postmarketOS solves the
+# same problem by ordering msm-firmware-loader ahead of module loading.
+#
+# The drivers cannot simply be built into the kernel instead: the files
+# they need live on a partition that is not mounted until erlinit mounts
+# it, long after a built-in driver would have probed.
 #
 # The BCM43430A1's chip firmware is generic and ships in the rootfs. Its
 # calibration data is not: the Wi-Fi NVRAM carries this watch's MAC
@@ -13,16 +32,23 @@
 # firmware_class.path is searched *before* /lib/firmware, so this
 # supplements the shipped firmware rather than replacing it.
 #
-# Run this before the brcmfmac or hci_uart modules are loaded. Exits 0 even
-# when it finds nothing: a watch with no Wi-Fi is still a working watch,
-# and the log says what was missing.
+# Exits 0 whatever happens. A watch with no Wi-Fi is still a working watch,
+# and a non-zero exit here would stop the BEAM from ever starting.
 
 set -u
 
 FWDIR=/run/firmware
 PARAM=/sys/module/firmware_class/parameters/path
 
-log() { echo "ticwatch-firmware-setup: $*"; }
+# Log to the kernel ring buffer as well as stdout. erlinit sends this
+# script's stdout to the console, which on a watch scrolls past before
+# anyone can read it; the ring buffer is still there afterwards under
+# `dmesg | grep ticwatch-bringup`.
+log() {
+	echo "ticwatch-bringup: $*"
+	[ -w /dev/kmsg ] && echo "ticwatch-bringup: $*" > /dev/kmsg 2>/dev/null
+	return 0
+}
 
 # brcmfmac builds the NVRAM filename from the device tree: it appends the
 # `brcm,board-type` property, or failing that the root node's compatible
@@ -105,5 +131,24 @@ if [ "$found_any" = "1" ]; then
 		log "cannot write $PARAM — is CONFIG_FW_LOADER built in?"
 	fi
 fi
+
+# Load the drivers, now that anything they will ask for is in place.
+#
+# Nothing else would: there is no udev running to act on the SDIO and
+# serdev uevents, and no init scripts. Without this the watch boots to a
+# working Erlang prompt with no touchscreen, no Wi-Fi and no Bluetooth.
+#
+#   zinitix   touchscreen  — no firmware, listed here so there is one
+#                            place that says what gets loaded
+#   brcmfmac  Wi-Fi        — wants brcm/brcmfmac43430-sdio.bin plus the
+#                            NVRAM staged above
+#   hci_uart  Bluetooth    — pulls in btbcm, which wants the .hcd
+for mod in zinitix brcmfmac hci_uart; do
+	if modprobe "$mod" 2>/dev/null; then
+		log "loaded $mod"
+	else
+		log "could not load $mod"
+	fi
+done
 
 exit 0

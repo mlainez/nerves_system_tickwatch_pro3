@@ -97,7 +97,7 @@ CONFIG_INSMOD=y
 CONFIG_FEATURE_MODPROBE_BLACKLIST=y
 
 # --- find ---------------------------------------------------------------------
-# ticwatch-firmware-setup walks the stock Android partitions looking for
+# ticwatch-bringup walks the stock Android partitions looking for
 # the Wi-Fi NVRAM and the Bluetooth patch RAM image under whichever of a
 # handful of names and directories this firmware revision used, so it
 # needs find with -maxdepth, -type and -name.

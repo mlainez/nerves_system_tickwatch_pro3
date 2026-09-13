@@ -17,7 +17,7 @@ config BR2_PACKAGE_TICWATCH_PRO3_FIRMWARE
 	  NVRAM and the Bluetooth patch RAM image are specific to the board
 	  — in the NVRAM's case, to the individual watch, since it carries
 	  the MAC address — and live on the stock Android partitions. They
-	  cannot be shipped here. ticwatch-firmware-setup finds them at boot
+	  cannot be shipped here. ticwatch-bringup finds them at boot
 	  on the read-only /mnt/vendor and /mnt/persist mounts and presents
 	  them under the names brcmfmac and hci_bcm ask for.
 
