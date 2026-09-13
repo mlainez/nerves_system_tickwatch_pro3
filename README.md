@@ -68,8 +68,10 @@ fastboot reboot
 
 **`dtbo.img` is not optional.** The stock bootloader applies the overlay
 in the `dtbo` partition on top of lk2nd's device tree, and the stock
-overlay stops lk2nd from running. The file here is an empty overlay that
-changes nothing, which is the documented fix.
+overlay stops lk2nd from running. The file here makes it apply nothing,
+which is the documented fix. If lk2nd still does not come up on a GPS
+watch, `prebuilt/dtbo/make-dtbo.sh` builds an alternative that names both
+SoC IDs explicitly — see [`prebuilt/README.md`](prebuilt/README.md).
 
 After that, `mix upload` works over the network as usual.
 
@@ -161,6 +163,14 @@ stock bootloader  ── matches qcom,msm-id + qcom,board-id ──▶ lk2nd (bo
 lk2nd             ── scans partitions >16 MiB for /extlinux/extlinux.conf ──▶ boot subpartition
 kernel + initramfs ── kpartx, mount squashfs, switch_root ──▶ erlinit ──▶ your OTP release
 ```
+
+The second step is less obvious than it looks: the Nerves boot partition
+is not an eMMC partition at all, it is nested inside `userdata`. lk2nd
+copes because it publishes every GPT partition as a block device and then
+runs its MBR parser over each one, so the nested layout shows up as
+another level of block devices. It then mounts every leaf larger than
+16 MiB as ext2 and looks for `/extlinux/extlinux.conf` on it — which our
+64 MiB boot subpartition is, and has.
 
 lk2nd gives the kernel, initramfs and device tree a combined **50 MiB**
 of boot memory on this platform. That is the real constraint on the boot
