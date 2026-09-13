@@ -18,6 +18,11 @@ define TICWATCH_PRO3_FIRMWARE_INSTALL_TARGET_CMDS
 	mkdir -p $(TARGET_DIR)/lib/firmware/brcm
 	ln -sf ../cypress/cyfmac43430-sdio.bin \
 		$(TARGET_DIR)/lib/firmware/brcm/brcmfmac43430-sdio.bin
+	# The regulatory (CLM) blob is requested separately and is optional —
+	# brcmfmac logs a warning and carries on without it, with whatever
+	# regulatory defaults are compiled into the firmware.
+	ln -sf ../cypress/cyfmac43430-sdio.clm_blob \
+		$(TARGET_DIR)/lib/firmware/brcm/brcmfmac43430-sdio.clm_blob
 
 	$(INSTALL) -D -m 0755 $(@D)/ticwatch-firmware-setup \
 		$(TARGET_DIR)/usr/sbin/ticwatch-firmware-setup
