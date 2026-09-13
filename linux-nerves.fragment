@@ -63,3 +63,22 @@ CONFIG_FONT_TER16x32=y
 # Nerves' kmod is not, so a compressed module is one that silently fails
 # to load.
 # CONFIG_MODULE_COMPRESS is not set
+
+# --- Debug info --------------------------------------------------------------
+#
+# postmarketOS builds with full DWARF5 plus BTF. BTF is the expensive one
+# here: it needs pahole on the build host, and unlike DWARF it is not
+# stripped out of the kernel image — it ships in a .BTF section for BPF
+# introspection at runtime. That is several megabytes charged against the
+# 50 MiB lk2nd gives the kernel, initramfs and device tree together, to
+# support tooling this system does not carry.
+#
+# Turn BTF back on with BR2_LINUX_KERNEL_NEEDS_HOST_PAHOLE=y in
+# nerves_defconfig if you want to run bpftrace on the watch.
+# CONFIG_DEBUG_INFO_BTF is not set
+# CONFIG_DEBUG_INFO_BTF_MODULES is not set
+
+# DWARF stays off too. It does not reach the target — the image is built
+# from a stripped Image — but it makes every object file several times
+# larger and slows the build down for nothing.
+CONFIG_DEBUG_INFO_NONE=y
