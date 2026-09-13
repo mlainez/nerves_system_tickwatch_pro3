@@ -3,7 +3,7 @@ BR2_cortex_a53=y
 BR2_TOOLCHAIN_EXTERNAL=y
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
 BR2_TOOLCHAIN_EXTERNAL_DOWNLOAD=y
-BR2_TOOLCHAIN_EXTERNAL_URL="https://github.com/nerves-project/toolchains/releases/download/v15.3.0/nerves_toolchain_aarch64_nerves_linux_gnu-linux_${shell uname -m}-15.3.0-8DAF9F3.tar.xz"
+BR2_TOOLCHAIN_EXTERNAL_URL="https://github.com/nerves-project/toolchains/releases/download/v15.3.1/nerves_toolchain_aarch64_nerves_linux_gnu-linux_${shell uname -m}-15.3.1-C0D130A.tar.xz"
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="aarch64-nerves-linux-gnu"
 BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_0=y
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
@@ -23,6 +23,13 @@ BR2_REPRODUCIBLE=y
 BR2_ROOTFS_SKELETON_CUSTOM=y
 BR2_ROOTFS_SKELETON_CUSTOM_PATH="${BR2_EXTERNAL_NERVES_PATH}/board/nerves-common/skeleton"
 BR2_INIT_NONE=y
+# eudev, not plain devtmpfs. Nothing here runs udevd — erlinit and the
+# OTP release do the work, and the initramfs uses busybox mdev — but
+# multipath-tools links against libudev, and multipath-tools is where
+# kpartx comes from. kpartx is what maps the Nerves subpartitions out of
+# the stock userdata partition at boot, so without this the watch does
+# not get as far as mounting a rootfs.
+BR2_ROOTFS_DEVICE_CREATION_DYNAMIC_EUDEV=y
 BR2_ROOTFS_DEVICE_TABLE="${BR2_EXTERNAL_NERVES_PATH}/board/nerves-common/device_table.txt"
 BR2_ENABLE_LOCALE_WHITELIST="locale-archive"
 BR2_GENERATE_LOCALE="en_US.UTF-8"
@@ -36,9 +43,13 @@ BR2_ROOTFS_POST_IMAGE_SCRIPT="${NERVES_DEFCONFIG_DIR}/post-createfs.sh"
 # checksum is computed from package_files() in mix.exs, so a moving ref
 # would let a stale prebuilt artifact be reused silently.
 BR2_LINUX_KERNEL=y
-BR2_LINUX_KERNEL_CUSTOM_GIT=y
-BR2_LINUX_KERNEL_CUSTOM_REPO_URL="https://github.com/msm89x7-mainline/linux"
-BR2_LINUX_KERNEL_CUSTOM_REPO_VERSION="50f9719b10cef792432485b0139fbcb913316e07"
+# A tarball rather than a git clone. Buildroot's git backend fetches every
+# ref, which on a Linux fork means several gigabytes and a long server-side
+# pack; the tarball is one immutable file. The URL names the commit behind
+# tag v7.1.3-r1 rather than the tag itself, so a moved tag cannot silently
+# change which kernel gets built.
+BR2_LINUX_KERNEL_CUSTOM_TARBALL=y
+BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION="https://github.com/msm89x7-mainline/linux/archive/50f9719b10cef792432485b0139fbcb913316e07.tar.gz"
 # The base config is postmarketOS's, verbatim; our deltas live in the
 # fragment so that refreshing from pmaports is a copy rather than a merge.
 # See linux-nerves.fragment for what we change and why.

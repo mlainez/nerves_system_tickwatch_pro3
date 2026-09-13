@@ -14,17 +14,47 @@ again by `mix firmware` or by an over-the-air update.
 The stock bootloader applies whatever device tree overlay it finds in the
 `dtbo` partition on top of the device tree in the boot image. On this
 watch that overlay is incompatible with lk2nd's, and applying it stops
-lk2nd from running at all. Flashing an empty overlay is the fix.
-
-It is 254 bytes: a DTBO container header wrapping one 158-byte device
-tree that changes nothing.
+lk2nd from running at all. Flashing something inert is the fix.
 
 - Source: <https://github.com/NekoCWD/mobvoi-rover-dtbo> (release `First`)
 - sha256: `10a2d1bed002355fe903d5c73f82df579a148ec9129ec78c772d3f7eddba9cd4`
 
 This is the file the postmarketOS wiki points at for
-[mobvoi-rover](https://wiki.postmarketos.org/wiki/Mobvoi_Ticwatch_Pro_3_LTE_(mobvoi-rover)#lk2nd),
-and it is not specific to the LTE variant.
+[mobvoi-rover](https://wiki.postmarketos.org/wiki/Mobvoi_Ticwatch_Pro_3_LTE_(mobvoi-rover)#lk2nd).
+
+It is worth knowing what it actually contains, because it is not simply
+an empty overlay. The 254-byte file is a DTBO container declaring **two**
+entries whose payloads sit at offsets 96 and 94837, each 94741 bytes long
+— both of which run past the end of the file. Only the first 158 bytes of
+the first payload are present:
+
+```
+/ {
+	qcom,msm-id = <0x1a0 0x00>;   /* 416 — SDM429W, the LTE SoC */
+	qcom,board-id = <0x10b 0x08>;
+	__fixups__ { };
+};
+```
+
+So it works by being truncated: there is nothing coherent for the
+bootloader to apply. That is a blunt instrument, and it was tested on the
+LTE watch. It should behave the same on the GPS watch — the file is
+malformed before the SoC ID is ever compared — but that has not been
+verified, and the only SoC ID it names is the LTE one.
+
+### If it does not work on a GPS watch
+
+`dtbo/make-dtbo.sh` builds a conventional alternative: a valid container
+with one genuinely empty overlay per SoC, covering both 416 (SDM429W,
+`rover`) and 437 (SDA429W, `rubyfish`).
+
+```sh
+./dtbo/make-dtbo.sh
+fastboot flash dtbo dtbo/dtbo-empty.img
+```
+
+Try the shipped `dtbo.img` first — it is the one with real mileage on it.
+Reach for this only if lk2nd does not come up.
 
 ## `lk2nd.img`
 
