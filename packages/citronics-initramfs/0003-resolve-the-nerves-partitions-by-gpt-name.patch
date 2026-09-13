@@ -1,18 +1,18 @@
-From a341044df0996bedd6607834e55d6aec28df63a2 Mon Sep 17 00:00:00 2001
+From c100855986715d7aebb26238f30a64c7210bf018 Mon Sep 17 00:00:00 2001
 From: Marc Lainez <marc.lainez@gmail.com>
 Date: Sun, 13 Sep 2026 10:16:03 +0200
 Subject: [PATCH] Resolve the Nerves partitions by GPT name
 
 ---
- .../share/citronics-initramfs/functions.sh    | 72 ++++++++++++++++++-
- initramfs/usr/share/citronics-initramfs/init  | 13 ++--
- 2 files changed, 79 insertions(+), 6 deletions(-)
+ .../share/citronics-initramfs/functions.sh    | 85 ++++++++++++++++++-
+ initramfs/usr/share/citronics-initramfs/init  | 13 ++-
+ 2 files changed, 92 insertions(+), 6 deletions(-)
 
 diff --git a/initramfs/usr/share/citronics-initramfs/functions.sh b/initramfs/usr/share/citronics-initramfs/functions.sh
-index b01b959..ed7cfa8 100755
+index b01b959..87c6d2e 100755
 --- a/initramfs/usr/share/citronics-initramfs/functions.sh
 +++ b/initramfs/usr/share/citronics-initramfs/functions.sh
-@@ -317,6 +317,74 @@ has_unallocated_space() {
+@@ -317,6 +317,87 @@ has_unallocated_space() {
              head -n1 | grep -qi "free space"
  }
  
@@ -51,15 +51,28 @@ index b01b959..ed7cfa8 100755
 +# and 3 always describe the slot that is about to run. That is why this
 +# only ever looks at p1/p2/p3 and never has to work out which slot is live.
 +nerves_setup_partitions() {
-+    local want base b
++    local want base b i
 +
 +    want=$(get_kernel_param "nerves_base")
 +    [ -n "$want" ] || return 1
 +
-+    base=$(nerves_find_partition "$want") || {
++    # MMC probing is asynchronous: on a cold boot the eMMC and its
++    # partitions may not have shown up in sysfs yet. Upstream's
++    # map_and_resize_root_partition waits ten seconds for the device for
++    # the same reason; wait here too, or the very first boot loses a race
++    # it will win every time afterwards.
++    i=0
++    while [ "$i" -lt 30 ]; do
++        base=$(nerves_find_partition "$want") && break
++        [ "$i" = 0 ] && echo_kmsg "Waiting for a partition named '$want'..."
++        i=$((i + 1))
++        sleep 1
++    done
++
++    if [ -z "${base:-}" ]; then
 +        echo_kmsg "No partition named '$want' — falling back to rootfs= on the cmdline"
 +        return 1
-+    }
++    fi
 +    echo_kmsg "Nerves base partition '$want' is $base"
 +
 +    kpartx -asf "$base"
@@ -87,7 +100,7 @@ index b01b959..ed7cfa8 100755
  map_and_resize_root_partition() {
      local rootfs part_num rootfs_path base_device mapper_path output
      local timeout=10
-@@ -377,7 +445,7 @@ map_and_resize_root_partition() {
+@@ -377,7 +458,7 @@ map_and_resize_root_partition() {
  
  mount_rootfs() {
      local rootfs
@@ -96,7 +109,7 @@ index b01b959..ed7cfa8 100755
      # Wait for the rootfs device to be available, with a timeout of 10 seconds
      local rootfs_device="$rootfs"
      local timeout=20
-@@ -396,7 +464,7 @@ mount_rootfs() {
+@@ -396,7 +477,7 @@ mount_rootfs() {
  
  mount_boot_partition() {
      local boot_partition
