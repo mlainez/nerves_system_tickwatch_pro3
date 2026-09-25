@@ -9,7 +9,8 @@
 #   CONFIG_EXT2_FS=y                           <- boot subpartition
 #   CONFIG_F2FS_FS=y                           <- application data
 #   CONFIG_BLK_DEV_DM=y                        <- kpartx
-#   CONFIG_USB_CONFIGFS=y                      <- USB recovery net
+#   CONFIG_USB_ETH=y                           <- USB net (g_ether)
+#   CONFIG_USB_CONFIGFS=y                      <- diagnostic fallback
 #   CONFIG_MMC_SDHCI_MSM=y                     <- the eMMC itself
 #
 # Carrying .ko files here would only inflate the cpio.gz against the
