@@ -88,6 +88,10 @@ tree, `sdm429w-mobvoi-rover`.
 The image here has 29 appended DTBs — the 27 in release 23.1, plus these
 two.
 
+The patch is also committed as the
+[`ticwatch-pro3`](https://github.com/Spin42/lk2nd/tree/ticwatch-pro3) branch
+on Spin42's lk2nd fork, based on the 23.1 tag.
+
 - sha256: `69abc759560e55602d3697b368a5f33c08507dc66745ab944396aa8595968ed6`
 - Built with: `arm-none-eabi-gcc`, `LK2ND_VERSION=23.1-nerves-tickwatch-pro3`
 
