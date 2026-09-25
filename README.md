@@ -12,7 +12,7 @@ watch.
 | Storage | 8 GB eMMC; firmware lives inside the stock `userdata` partition |
 | Display | 454×454 AMOLED, via lk2nd's framebuffer and SimpleDRM |
 | Touch | Zinitix BT541 |
-| Linux | [`msm89x7-mainline/linux`](https://github.com/msm89x7-mainline/linux) 7.1.3 |
+| Linux | [`msm89x7-mainline/linux`](https://github.com/msm89x7-mainline/linux) 7.1.3-r1 |
 | Bootloader | lk2nd (`msm8952` target) → `extlinux/extlinux.conf` on the boot subpartition |
 | Console | On-device display (`tty1`), or telnet over USB from the initramfs |
 | Wi-Fi / BT | Broadcom BCM43430A1 — `brcmfmac` over SDIO, `hci_uart` over UART |
@@ -46,9 +46,9 @@ not change what the kernel supports.
 Working: boot, eMMC, USB networking, display (SimpleDRM), touchscreen,
 battery and charging, Wi-Fi, Bluetooth.
 
-Not working: 3D acceleration, audio, GPS, cellular (LTE variant),
-accelerometer and the other sensors, haptics. NFC enumerates but has no
-userspace support.
+New and awaiting hardware validation: heart rate, accelerometer, gyroscope
+and the stock-stack GPS compatibility path. Not working: audio, cellular
+(LTE variant) and haptics. NFC enumerates but has no userspace support.
 
 ## Flashing
 
@@ -100,6 +100,7 @@ of the system uses:
 
 | Alias | What |
 | --- | --- |
+| `/dev/rootdisk0` | standard Nerves alias for the stock `userdata` firmware container |
 | `/dev/nerves-userdata` | the stock partition holding everything |
 | `/dev/nerves-boot` | active boot slot (ext2, mounted at `/boot`, read-only) |
 | `/dev/nerves-rootfs` | active rootfs slot (squashfs) |
@@ -156,6 +157,23 @@ The kernel configuration is postmarketOS's
 copy, and the fragment is a short, readable list of what Nerves needs
 that postmarketOS does not.
 
+The active 7.1.3-r1 kernel is pinned to
+`50f9719b10cef792432485b0139fbcb913316e07`.
+The CPU-removal patch is version-specific: 7.1 names the absent cores
+`cpu0` through `cpu3`; the physical cores at 0x100 through 0x103 remain.
+
+For rubyfish Wi-Fi, the board patch describes fixed 1.8-V SDIO I/O and
+stock's 4-mA pin drive, retaining 50 MHz. It does not control unverified
+external regulator GPIOs. A modprobe option disables only firmware WPA
+authentication offload (`FWSUP`, bit 13), avoiding the missing authorization
+notification expected by wpa_supplicant 2.11/2.12. Userspace WPA authentication
+was verified after a firmware update over Wi-Fi, including a 120-ping test
+with no packet loss; this is separate from SDIO power saving,
+which remains enabled. No retry, extended-reset or diagnostic module is shipped.
+
+When removing or changing kernel patches, re-extract the cached Linux source
+before rebuilding: Buildroot does not undo patches already applied to it.
+
 ## Boot chain
 
 ```
@@ -197,6 +215,11 @@ mounts and before Erlang starts:
    for, and point `firmware_class.path` at it
 3. `modprobe zinitix brcmfmac hci_uart`
 
+The script does not wait for `wlan0` before starting Erlang. VintageNet
+handles the interface appearing asynchronously. Applications should configure
+a stable MAC through VintageNet; `hello_watch` derives it from the eMMC CID
+with its `HelloWatch.WiFi.stable_mac/0` callback.
+
 The order is the point. The drivers cannot just be built into the kernel:
 the files they need live on a partition that is not mounted until erlinit
 mounts it, long after a built-in driver would have probed and failed.
@@ -205,6 +228,52 @@ ordering `msm-firmware-loader` ahead of module loading.
 
 The script always exits 0 — a missing blob costs you Wi-Fi, not a boot.
 Check `dmesg` for lines prefixed `ticwatch-bringup:` to see what it found.
+
+The initramfs names its `/dev` mount `devtmpfs`, matching erlinit's
+shutdown exclusion. This avoids trying to unmount it while the console is
+still open. Keep the mount and its transfer into the real root filesystem.
+The package patch has been checked but still needs a firmware rebuild and
+an update/reboot test.
+
+### Sensor support
+
+Rubyfish's motion and heart-rate sensors are behind an STM32 nanohub. The
+`nanohub-driver` package ports Mobvoi's Android 4.9 SPI driver to Linux 7.1,
+and the rover DT patch supplies the missing BLSP2 QUP4 controller and GPIO
+wiring. Bringup loads the module without altering the hub's stock firmware;
+the dangerous downstream flash/erase/lock sysfs controls are intentionally
+not exposed.
+
+Mobvoi's stock sensor table confirms IDs 100 (heart rate), 1 (accelerometer)
+and 2 (gyroscope). Read hub metadata and stream newline-delimited JSON with:
+
+```sh
+nanohubctl info
+nanohubctl stream heart
+nanohubctl stream accel 50
+nanohubctl stream gyro 50
+```
+
+These are direct hub events, not Android Sensor HAL output. On-device testing
+after installing this firmware is still required, particularly for the
+heart-rate nanoapp's measurement preconditions and calibration.
+
+GPS is separate: the watch has a BCM4775 on BLSP1 SPI3. The
+`bcm4775-driver` package ports its BBD transport and provides `/dev/ttyBCM`
+and `/dev/bbd_*`. The `android-gps-compat` package mounts the watch's retained
+Android `system` and `vendor` partitions read-only, starts the stock 32-bit
+Broadcom `lhd`/`gpsd` stack on demand, and loads `gps.default.so` through a
+small ARM32 bridge. No proprietary file is copied into this repository or the
+firmware.
+
+From a target shell, `gpsctl stream` prints newline-delimited JSON location,
+satellite, NMEA and status events. `gpsctl stop`, `status` and `logs` manage
+and diagnose the stack. In `hello_watch`, `HelloWatch.GPS.start_stream/0` and
+`HelloWatch.GPS.subscribe/0` expose the same events as `{:gps, map}` messages.
+GPS remains powered off until it is explicitly started. This path still needs
+validation against the exact Mobvoi daemon/library revisions on a watch.
+
+See the [downstream hub driver](https://github.com/ONE-WearOS/android_kernel_mobvoi_rover/tree/pie/drivers/staging/nanohub).
 
 ## Known gaps
 
@@ -223,7 +292,9 @@ Check `dmesg` for lines prefixed `ticwatch-bringup:` to see what it found.
   brightness control and no vsync, and nothing ever asks the Adreno 504
   for firmware. A graphics stack on top of this would go through Mesa's
   `kms_swrast` and render on the CPU.
-- **No audio, GPS or sensors.** Not supported by the mainline port yet.
+- **Audio remains unsupported.** Heart rate, motion sensors and GPS now have
+  kernel/userspace paths in the build, but require on-device validation;
+  PM660 electrical and internal-temperature interfaces are also exposed.
 - **No cellular** on the LTE watch. The modem is not brought up; the
   Qualcomm remoteproc/QRTR stack that `nerves_system_fp3` carries would
   be the starting point.
