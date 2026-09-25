@@ -13,6 +13,9 @@ hardware-specific it is.
 
 | Package | Tag | Notes |
 |---|---|---|
+| `android-gps-compat` | `[TicWatch Pro 3]` | On-demand 32-bit Android GPS HAL bridge; reuses the watch's stock read-only `system`/`vendor` files and emits JSON for Elixir. |
+| `nanohub-driver` | `[TicWatch Pro 3]` | Linux 7.1 port of the STM32 nanohub SPI transport plus `nanohubctl` for heart rate, accelerometer and gyroscope events. |
+| `bcm4775-driver` | `[TicWatch Pro 3]` | Linux 7.1 port of the BCM4775 BBD/SPI kernel transport used by `android-gps-compat`. |
 | `citronics-initramfs` | `[TicWatch Pro 3]` | Early-boot initramfs: maps the Nerves subpartitions out of the stock `userdata` partition and pivots into the squashfs. |
 | `ticwatch-pro3-firmware` | `[TicWatch Pro 3]` | BCM43430A1 Wi-Fi/Bluetooth firmware plumbing. |
 | `qbootctl` | `[Qualcomm generic]` | Userspace half of the bootloader's A/B slot accounting. |

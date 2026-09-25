@@ -5,6 +5,9 @@
 menu "Custom Packages"
 
 source "$NERVES_DEFCONFIG_DIR/packages/citronics-initramfs/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/android-gps-compat/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/bcm4775-driver/Config.in"
+source "$NERVES_DEFCONFIG_DIR/packages/nanohub-driver/Config.in"
 source "$NERVES_DEFCONFIG_DIR/packages/qbootctl/Config.in"
 source "$NERVES_DEFCONFIG_DIR/packages/reboot-mode/Config.in"
 source "$NERVES_DEFCONFIG_DIR/packages/ticwatch-pro3-firmware/Config.in"

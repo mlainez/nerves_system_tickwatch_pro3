@@ -1,0 +1,197 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+
+set -u
+
+RUN=/run/android-gps
+SYSTEM_MOUNT=/mnt/android-system
+DATA_ROOT=/root/android-gps-data
+ANDROID_LINKER=
+
+log() { echo "gpsctl: $*" >&2; }
+mounted() { grep -q " $1 " /proc/mounts; }
+
+prepare_mounts() {
+	mkdir -p "$RUN" "$SYSTEM_MOUNT" /system /vendor /data /dev/socket
+
+	if ! mounted "$SYSTEM_MOUNT"; then
+		[ -e /dev/nerves-system ] || {
+			log "stock system partition is unavailable (/dev/nerves-system)"
+			return 1
+		}
+		mount -t ext4 -o ro,nodev,nosuid /dev/nerves-system "$SYSTEM_MOUNT" || return 1
+	fi
+
+	if [ -x "$SYSTEM_MOUNT/system/bin/linker" ] ||
+	   [ -x "$SYSTEM_MOUNT/system/bin/bootstrap/linker" ] ||
+	   [ -x "$SYSTEM_MOUNT/system/apex/com.android.runtime/bin/linker" ]; then
+		system_root="$SYSTEM_MOUNT/system"
+	elif [ -x "$SYSTEM_MOUNT/bin/linker" ]; then
+		system_root="$SYSTEM_MOUNT"
+	else
+		log "32-bit Android linker not found on the stock system partition"
+		return 1
+	fi
+
+	if ! mounted /system; then
+		mount -o bind "$system_root" /system || return 1
+		mount -o remount,bind,ro,exec,nodev,nosuid /system || return 1
+	fi
+
+	# Android 10 and newer move the runtime linker into the Runtime APEX.
+	# During early boot they retain a bootstrap copy under /system/bin; unlike
+	# the APEX path it does not depend on Android init having mounted /apex.
+	for candidate in /system/bin/linker /system/bin/bootstrap/linker \
+		/system/apex/com.android.runtime/bin/linker; do
+		if [ -x "$candidate" ]; then
+			ANDROID_LINKER="$candidate"
+			break
+		fi
+	done
+	[ -n "$ANDROID_LINKER" ] || {
+		log "32-bit Android linker not found after mounting /system"
+		return 1
+	}
+
+	if ! mounted /vendor; then
+		[ -d /mnt/vendor/lib ] || {
+			log "stock vendor partition is unavailable"
+			return 1
+		}
+		mount -o bind /mnt/vendor /vendor || return 1
+		mount -o remount,bind,ro,exec,nodev,nosuid /vendor || return 1
+	fi
+
+	# Give the Android processes durable writable state on Nerves' application
+	# partition. /data itself is only an empty directory in the squashfs.
+	mkdir -p "$DATA_ROOT/vendor/gps" "$DATA_ROOT/misc/gps" "$DATA_ROOT/system/gps"
+	if ! mounted /data; then
+		mount -o bind "$DATA_ROOT" /data || return 1
+		mount -o remount,bind,rw,nodev,nosuid /data || return 1
+	fi
+}
+
+find_binary() {
+	for p in "$@"; do
+		[ -x "$p" ] && { echo "$p"; return 0; }
+	done
+	return 1
+}
+
+# lhd drives the receiver's standby line through legacy GPIO sysfs, which this
+# kernel does not build. The bcm4775-bbd driver exposes the same line as a
+# device attribute, so point lhd at that instead of /sys/class/gpio.
+find_nstandby() {
+	for p in /sys/devices/platform/*/*.spi/spi_master/spi*/spi*.*/nstandby; do
+		[ -w "$p" ] && { echo "$p"; return 0; }
+	done
+	return 1
+}
+
+# Android init passes lhd its config; without it lhd never learns where the
+# BBD devices or the receiver's firmware patch are, and the engine sees no
+# GNSS data at all. Adapt the stock config rather than shipping our own copy.
+prepare_lhd_conf() {
+	src=/vendor/etc/lhd.conf
+	dst="$RUN/lhd.conf"
+
+	[ -f "$src" ] || { log "lhd.conf is missing from the vendor partition"; return 1; }
+
+	if nstandby=$(find_nstandby); then
+		sed "s|^GpioNStdbyPath=.*|GpioNStdbyPath=$nstandby|" "$src" >"$dst" || return 1
+	else
+		log "no nstandby attribute found; keeping the stock standby path"
+		cp "$src" "$dst" || return 1
+	fi
+	echo "$dst"
+}
+
+start_daemon() {
+	name=$1
+	shift
+	pidfile="$RUN/$name.pid"
+	if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+		return 0
+	fi
+	LD_LIBRARY_PATH=/vendor/lib/hw:/vendor/lib:/system/lib "$@" >"$RUN/$name.log" 2>&1 &
+	echo $! > "$pidfile"
+}
+
+start_stack() {
+	prepare_mounts || return 1
+	[ -x /usr/libexec/gps-hal-bridge32 ] || {
+		log "GPS HAL bridge is missing"
+		return 1
+	}
+	modprobe bcm4775-bbd || { log "could not load bcm4775-bbd"; return 1; }
+
+	lhd=$(find_binary /vendor/bin/lhd /system/bin/lhd) || {
+		log "lhd not found on the stock partitions"; return 1;
+	}
+	engine=$(find_binary /vendor/bin/gpsd /vendor/bin/glgps /system/bin/gpsd /system/bin/glgps) || {
+		log "Broadcom GPS engine (gpsd/glgps) not found"; return 1;
+	}
+
+	lhd_conf=$(prepare_lhd_conf) || return 1
+	engine_conf=/vendor/etc/gps.xml
+	[ -f "$engine_conf" ] || {
+		log "gps.xml is missing from the vendor partition"; return 1;
+	}
+
+	# The engine owns /dev/socket/gps; lhd supplies its `lhd` logical port.
+	# Modern Android images keep the binaries' ELF interpreter path at
+	# /system/bin/linker even when only the bootstrap copy is present in the
+	# filesystem image. Invoke the discovered linker explicitly for both
+	# daemons. The socket wrapper still gives gpsd Android init's inherited fd.
+	start_daemon engine /usr/libexec/android-socket-exec "$ANDROID_LINKER" \
+		"$engine" -c "$engine_conf"
+	start_daemon lhd "$ANDROID_LINKER" "$lhd" "$lhd_conf"
+	sleep 1
+	for name in engine lhd; do
+		pid=$(cat "$RUN/$name.pid")
+		kill -0 "$pid" 2>/dev/null || {
+			log "$name exited; see $RUN/$name.log"
+			return 1
+		}
+	done
+}
+
+stop_stack() {
+	for name in bridge lhd engine; do
+		pidfile="$RUN/$name.pid"
+		[ -f "$pidfile" ] || continue
+		pid=$(cat "$pidfile")
+		kill "$pid" 2>/dev/null || true
+		rm -f "$pidfile"
+	done
+}
+
+status_stack() {
+	for name in engine lhd; do
+		pidfile="$RUN/$name.pid"
+		if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+			echo "$name running pid=$(cat "$pidfile")"
+		else
+			echo "$name stopped"
+		fi
+	done
+	for dev in /dev/ttyBCM /dev/bbd_control /dev/bbd_sensor /dev/bbd_patch; do
+		[ -e "$dev" ] && echo "device ready $dev" || echo "device missing $dev"
+	done
+}
+
+case "${1:-}" in
+	prepare) prepare_mounts ;;
+	start) start_stack ;;
+	stream)
+		start_stack || exit 1
+		exec env LD_LIBRARY_PATH=/vendor/lib/hw:/vendor/lib:/system/lib \
+			"$ANDROID_LINKER" /usr/libexec/gps-hal-bridge32 /vendor/lib/hw/gps.default.so
+		;;
+	stop) stop_stack ;;
+	status) status_stack ;;
+	logs)
+		for f in "$RUN"/*.log; do [ -f "$f" ] && { echo "== $f =="; tail -n 100 "$f"; }; done
+		;;
+	*) echo "usage: gpsctl {prepare|start|stream|stop|status|logs}" >&2; exit 2 ;;
+esac

@@ -1,0 +1,12 @@
+config BR2_PACKAGE_ANDROID_GPS_COMPAT
+	bool "android-gps-compat"
+	depends on BR2_aarch64
+	select BR2_PACKAGE_BCM4775_DRIVER
+	help
+	  Compatibility launcher and 32-bit Android HAL bridge for the
+	  Broadcom BCM4775 GNSS stack retained on the TicWatch's stock
+	  system and vendor partitions.
+
+	  No proprietary Android files are included. The partitions are
+	  mounted read-only at runtime and GPS is only started on demand.
+

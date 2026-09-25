@@ -1,0 +1,48 @@
+From: TicWatch Nerves maintainers
+Subject: [PATCH] arm64: dts: qcom: rover: describe fixed SDIO I/O voltage
+
+Rubyfish's stock overlay shares rover-wlan.dtsi: SDIO I/O is 1.8 V,
+with 4 mA active pin drive. Without vqmmc, sdhci-msm does not configure
+the pad voltage capabilities correctly; enumeration times out as soon
+as the clock changes from 400 kHz to 50 MHz. A fixed 1.8 V declaration
+restores enumeration. This describes the existing rail and does not
+operate an unverified external regulator GPIO. Keep the supported 50 MHz.
+
+Match the pin settings used in the successful RAM test. The 4 mA setting
+alone was not a fix for the separate WPA authentication-offload issue.
+
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -91,3 +91,11 @@
++	wifi_vqmmc: wifi-vqmmc-regulator {
++		compatible = "regulator-fixed";
++		regulator-name = "wifi-vqmmc";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		regulator-always-on;
++	};
++
+ 	sdio_pwrseq: sdio-pwrseq {
+ 		compatible = "mmc-pwrseq-simple";
+ 		pinctrl-names = "default";
+@@ -360,3 +368,4 @@
+ &sdhc_2 {
++	vqmmc-supply = <&wifi_vqmmc>;
+ 	cap-sd-highspeed;
+ 	cap-sdio-irq;
+@@ -385,3 +394,15 @@
++&sdc2_default {
++	clk-pins {
++		drive-strength = <4>;
++	};
++	cmd-pins {
++		drive-strength = <4>;
++	};
++	data-pins {
++		drive-strength = <4>;
++	};
++};
++
+ &sleep_clk {
+ 	clock-frequency = <32768>;
+ };

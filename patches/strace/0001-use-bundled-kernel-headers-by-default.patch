@@ -1,0 +1,29 @@
+From 9dd3e538cf51c8f71b2e1fb45058e67c58f1ddda Mon Sep 17 00:00:00 2001
+From: Nerves TickWatch Pro 3 <nerves@example.invalid>
+Date: Mon, 14 Sep 2026 00:00:00 +0000
+Subject: [PATCH] build: use bundled kernel headers by default
+
+strace 7.0 predates the io_uring UAPI shipped by Linux 7.1.  Its version
+check still chooses the target sysroot headers, then the io_uring decoder
+fails a compile-time layout assertion.  Use strace's bundled, matching UAPI
+definitions unless the caller explicitly selects another mode.
+
+---
+ configure | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configure b/configure
+index c68fb82..2f5f53e 100755
+--- a/configure
++++ b/configure
+@@ -6635,7 +6635,7 @@ Valid options are: yes, no, check.
+ 		;;
+ 	 esac
+ else case e in #(
+-  e) enable_bundled=check
++  e) enable_bundled=yes
+  ;;
+ esac
+ fi
+-- 
+2.51.0

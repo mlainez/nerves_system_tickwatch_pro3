@@ -1,0 +1,10 @@
+config BR2_PACKAGE_BCM4775_DRIVER
+	bool "bcm4775-driver [TicWatch Pro 3]"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_KMOD
+	help
+	  Linux 7.1 port of Mobvoi's Broadcom BBD/SPI transport for the
+	  BCM4775 GNSS receiver. It exposes /dev/ttyBCM and the
+	  /dev/bbd_* bridge devices. A location fix additionally requires a
+	  userspace Broadcom location engine, which is not included.
+

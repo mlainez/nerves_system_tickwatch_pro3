@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
+Date: Tue, 15 Sep 2026 00:00:00 +0000
+Subject: [PATCH] spi: qup: support SPI_NO_CS mode
+
+SPI_NO_CS is implemented by the SPI core: it suppresses calls to the
+controller's chip-select operation.  Advertising the flag therefore needs no
+QUP register programming, and permits devices such as Mobvoi's STM32 nanohub
+to drive a separately described GPIO chip select with protocol-specific
+timing.
+
+Signed-off-by: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
+---
+ drivers/spi/spi-qup.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/spi/spi-qup.c b/drivers/spi/spi-qup.c
+index 111111111111..222222222222 100644
+--- a/drivers/spi/spi-qup.c
++++ b/drivers/spi/spi-qup.c
+@@ -1090,7 +1090,8 @@ static int spi_qup_probe(struct platform_device *pdev)
+ 	host->use_gpio_descriptors = true;
+ 	host->max_native_cs = SPI_NUM_CHIPSELECTS;
+ 	host->bus_num = pdev->id;
+-	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH | SPI_LOOP;
++	host->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH | SPI_LOOP |
++			  SPI_NO_CS;
+ 	host->bits_per_word_mask = SPI_BPW_RANGE_MASK(4, 32);
+ 	host->max_speed_hz = max_freq;
+ 	host->transfer_one = spi_qup_transfer_one;
+-- 
+2.51.0

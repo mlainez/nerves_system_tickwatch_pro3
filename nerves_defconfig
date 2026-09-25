@@ -79,6 +79,7 @@ BR2_PACKAGE_E2FSPROGS_RESIZE2FS=y
 BR2_PACKAGE_F2FS_TOOLS=y
 BR2_PACKAGE_KMOD=y
 BR2_PACKAGE_KMOD_TOOLS=y
+BR2_PACKAGE_LIBMNL=y
 BR2_PACKAGE_UTIL_LINUX_BINARIES=y
 BR2_PACKAGE_CA_CERTIFICATES=y
 # Required by the citronics initramfs to kpartx the stock userdata
@@ -96,6 +97,25 @@ BR2_PACKAGE_WPA_SUPPLICANT_WPA3=y
 BR2_PACKAGE_WPA_SUPPLICANT_CLI=y
 BR2_PACKAGE_WPA_SUPPLICANT_WPA_CLIENT_SO=y
 BR2_PACKAGE_WPA_SUPPLICANT_PASSPHRASE=y
+# Match the official Nerves Raspberry Pi systems: let wpa_supplicant send its
+# internal diagnostics to syslog. This is particularly important on the watch,
+# where the SDIO link can disappear before an interactive shell can inspect it.
+BR2_PACKAGE_WPA_SUPPLICANT_DEBUG_SYSLOG=y
+
+# Interactive diagnostics over the USB Nerves IEx shell. These keep the image
+# self-contained when Wi-Fi has failed: inspect nl80211 and driver state, trace
+# processes, capture traffic, exercise throughput, and probe input/I2C/MMC/USB.
+BR2_PACKAGE_IW=y
+BR2_PACKAGE_ETHTOOL=y
+BR2_PACKAGE_TCPDUMP=y
+BR2_PACKAGE_STRACE=y
+BR2_PACKAGE_IPROUTE2=y
+BR2_PACKAGE_IPERF3=y
+BR2_PACKAGE_MMC_UTILS=y
+BR2_PACKAGE_I2C_TOOLS=y
+BR2_PACKAGE_EVTEST=y
+BR2_PACKAGE_USBUTILS=y
+BR2_PACKAGE_PROCPS_NG=y
 
 # Bluetooth — same chip, HCI over UART (brcm,bcm43430a1-bt).
 BR2_PACKAGE_BLUEZ5_UTILS=y
@@ -130,6 +150,9 @@ BR2_TARGET_ROOTFS_SQUASHFS4_LZ4=y
 
 # This system's own packages — see packages/README.md.
 BR2_PACKAGE_CITRONICS_INITRAMFS=y
+BR2_PACKAGE_BCM4775_DRIVER=y
+BR2_PACKAGE_ANDROID_GPS_COMPAT=y
+BR2_PACKAGE_NANOHUB_DRIVER=y
 BR2_PACKAGE_UNUDHCPD=y
 BR2_PACKAGE_QBOOTCTL=y
 BR2_PACKAGE_REBOOT_MODE=y

@@ -1,0 +1,30 @@
+From 1d9ba7d83a544cb753e52ad4df75b03895ae43dc Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Mon, 14 Sep 2026 16:30:00 +0000
+Subject: [PATCH] arm64: dts: qcom: rover: wait for Wi-Fi power
+
+Mobvoi's downstream bcmdhd power callback waits 100 ms after raising
+WL_REG_ON before accessing the SDIO device. Without the equivalent delay,
+the BCM43430 does not answer card initialization and mmc reports -ETIMEDOUT.
+
+Express the stabilization time through mmc-pwrseq-simple so it applies
+before the first SDIO command.
+---
+ arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+index b3ef26f04a2e..e042f63f7b19 100644
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -75,6 +75,7 @@ sdio_pwrseq: sdio-pwrseq {
+ 		pinctrl-names = "default";
+ 		pinctrl-0 = <&wifi_reg_on>;
+ 		reset-gpios = <&tlmm 72 GPIO_ACTIVE_LOW>;
++		post-power-on-delay-ms = <100>;
+ 	};
+ 
+ 	vibrator {
+-- 
+2.51.0
+

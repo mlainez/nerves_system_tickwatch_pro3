@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
+Date: Tue, 15 Sep 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: rover: add BCM4775 GNSS
+
+Describe the BCM4775 SPI receiver and its handshake, power and standby
+GPIOs using standard GPIO consumer property names. The wiring and SPI
+mode come from Mobvoi's downstream rover-gps.dtsi.
+
+Signed-off-by: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
+---
+ arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts | 34 +++++++++++++++++++----
+ 1 file changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+index 222222222222..333333333333 100644
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -144,8 +144,26 @@ &blsp1_i2c3 {
+ 
+ &blsp1_spi3 {
+ 	status = "okay";
+-
+-	// bcm4775 GNSS
++
++	gnss@0 {
++		compatible = "ssp,bcm4775";
++		reg = <0>;
++		spi-max-frequency = <16000000>;
++		spi-cpol;
++		spi-cpha;
++
++		interrupt-parent = <&tlmm>;
++		interrupts = <34 IRQ_TYPE_LEVEL_HIGH>;
++		pinctrl-0 = <&gps_control_default>;
++		pinctrl-1 = <&gps_control_sleep>;
++		pinctrl-names = "default", "sleep";
++
++		host-req-gpios = <&tlmm 34 GPIO_ACTIVE_HIGH>;
++		mcu-req-gpios = <&tlmm 41 GPIO_ACTIVE_HIGH>;
++		mcu-resp-gpios = <&tlmm 40 GPIO_ACTIVE_HIGH>;
++		power-enable-gpios = <&tlmm 43 GPIO_ACTIVE_HIGH>;
++		nstandby-gpios = <&tlmm 42 GPIO_ACTIVE_HIGH>;
++	};
+ };
+ 
+ &blsp2_i2c6 {
+@@ -520,7 +538,21 @@ &tlmm {
+ 	nanohub_spi_sleep: nanohub-spi-sleep-state {
+ 		pins = "gpio96", "gpio97", "gpio99";
+ 		function = "gpio";
+ 		drive-strength = <2>;
+ 		bias-pull-down;
+ 	};
++
++	gps_control_default: gps-control-default-state {
++		pins = "gpio34", "gpio40", "gpio41", "gpio42", "gpio43";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	gps_control_sleep: gps-control-sleep-state {
++		pins = "gpio34", "gpio40", "gpio41", "gpio42", "gpio43";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
+ };
+-- 
+2.51.0

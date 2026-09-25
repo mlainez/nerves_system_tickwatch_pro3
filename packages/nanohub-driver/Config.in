@@ -1,0 +1,11 @@
+config BR2_PACKAGE_NANOHUB_DRIVER
+	bool "nanohub-driver [TicWatch Pro 3]"
+	depends on BR2_LINUX_KERNEL
+	select BR2_PACKAGE_KMOD
+	help
+	  Port of Mobvoi's Android nanohub SPI transport for Linux 7.1.
+	  It exposes /dev/nanohub, /dev/nanohub_comms,
+	  /dev/nanohub_hr_log and /dev/nanohub_custom_flash, plus the
+	  nanohubctl utility for heart-rate, accelerometer and gyroscope
+	  access. The package never installs or flashes hub firmware.
+

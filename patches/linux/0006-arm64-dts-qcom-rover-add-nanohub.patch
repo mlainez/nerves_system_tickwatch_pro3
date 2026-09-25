@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
+Date: Tue, 15 Sep 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: rover: add nanohub
+
+The motion and optical health sensors are connected to Mobvoi's STM32
+nanohub rather than directly to the application processor. Describe the
+otherwise missing BLSP2 QUP4 controller and the GPIO wiring from the
+downstream rover-nanohub.dtsi.
+
+Use standard GPIO consumer property names for the Linux 7.1 port. The
+driver owns chip select because the hub protocol changes SPI settings
+between its bootloader and runtime transports.
+
+Signed-off-by: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
+---
+ arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts | 68 ++++++++++++++++++++++
+ 1 file changed, 68 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+index 111111111111..222222222222 100644
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -401,2 +401,70 @@ &xo_board {
+ 	clock-frequency = <19200000>;
+ };
++
++&soc {
++	nanohub_spi: spi@7af8000 {
++		compatible = "qcom,spi-qup-v2.2.1";
++		reg = <0x07af8000 0x600>;
++		interrupts = <GIC_SPI 302 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&gcc MSM8937_GCC_BLSP2_QUP4_SPI_APPS_CLK>,
++			 <&gcc GCC_BLSP2_AHB_CLK>;
++		clock-names = "core", "iface";
++		pinctrl-0 = <&nanohub_spi_default>;
++		pinctrl-1 = <&nanohub_spi_sleep>;
++		pinctrl-names = "default", "sleep";
++		#address-cells = <1>;
++		#size-cells = <0>;
++		status = "okay";
++
++		sensor-hub@0 {
++			compatible = "nanohub,nanohub_spi";
++			reg = <0>;
++			spi-max-frequency = <8000000>;
++			spi-no-cs;
++
++			irq1-gpios = <&tlmm 61 GPIO_ACTIVE_LOW>;
++			irq3-gpios = <&tlmm 59 GPIO_ACTIVE_LOW>;
++			wakeup-gpios = <&tlmm 63 GPIO_ACTIVE_HIGH>;
++			spi-cs-gpios = <&tlmm 98 GPIO_ACTIVE_HIGH>;
++			nreset-gpios = <&tlmm 70 GPIO_ACTIVE_HIGH>;
++			boot0-gpios = <&tlmm 65 GPIO_ACTIVE_HIGH>;
++			hub-flag-int-gpios = <&tlmm 64 GPIO_ACTIVE_HIGH>;
++			mode-flag1-gpios = <&tlmm 66 GPIO_ACTIVE_HIGH>;
++			mode-flag2-gpios = <&tlmm 60 GPIO_ACTIVE_HIGH>;
++			mode-flag3-gpios = <&tlmm 68 GPIO_ACTIVE_HIGH>;
++			mode-flag4-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
++			sensorhub,nreset_active_high;
++
++			sensorhub,bl-addr = <0x08000000>;
++			sensorhub,kernel-addr = <0x08020000>;
++			sensorhub,flash-banks = <0 0x08000000 0x04000>,
++						<4 0x08010000 0x10000>,
++						<5 0x08020000 0x20000>,
++						<6 0x08040000 0x20000>,
++						<7 0x08060000 0x20000>,
++						<8 0x08080000 0x20000>;
++			sensorhub,num-flash-banks = <6>;
++			sensorhub,shared-flash-banks = <2 0x08008000 0x04000>,
++						       <3 0x0800c000 0x04000>;
++			sensorhub,num-shared-flash-banks = <2>;
++			sensorhub,custom-flash-addr = <0x080a0000>;
++			sensorhub,custom-flash-len = <0x60000>;
++		};
++	};
++};
++
++&tlmm {
++	nanohub_spi_default: nanohub-spi-default-state {
++		pins = "gpio96", "gpio97", "gpio99";
++		function = "blsp_spi8";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	nanohub_spi_sleep: nanohub-spi-sleep-state {
++		pins = "gpio96", "gpio97", "gpio99";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++};
+-- 
+2.51.0
