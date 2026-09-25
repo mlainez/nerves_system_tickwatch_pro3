@@ -50,6 +50,22 @@ log() {
 	return 0
 }
 
+# Keep frequency scaling demand-driven even if another boot stage changed it.
+# This is not a substitute for working CPU idle/suspend support.
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+	[ -f "$policy/scaling_available_governors" ] || continue
+	case " $(cat "$policy/scaling_available_governors") " in
+		*" schedutil "*)
+			if printf '%s' schedutil > "$policy/scaling_governor"; then
+				log "CPU ${policy##*/}: governor=$(cat "$policy/scaling_governor")"
+			else
+				log "could not select schedutil for ${policy##*/}"
+			fi
+			;;
+		*) log "schedutil unavailable for ${policy##*/}" ;;
+	esac
+done
+
 # brcmfmac builds the NVRAM filename from the device tree: it appends the
 # `brcm,board-type` property, or failing that the root node's compatible
 # string, to the chip name. Our device tree sets no board-type, so the
@@ -59,7 +75,7 @@ NVRAM_NAMES="brcmfmac43430-sdio.mobvoi,rover.txt brcmfmac43430-sdio.txt"
 
 # What the stock firmware calls the same files. bcmdhd used .cal or
 # nvram.txt; the Android Bluetooth stack used a .hcd patch RAM image.
-NVRAM_CANDIDATES="bcmdhd.cal nvram.txt nvram_43430.txt bcmdhd_43430.cal nvram_mfg.txt"
+NVRAM_CANDIDATES="bcmdhd.cal nvram.txt nvram_43430.txt nvram_43438a1.txt bcmdhd_43430.cal nvram_mfg.txt"
 HCD_CANDIDATES="BCM43430A1.hcd bcm43430a1.hcd BCM4343A1.hcd"
 
 # Where Android tends to keep them. /persist is searched too because some
@@ -143,12 +159,22 @@ fi
 #   brcmfmac  Wi-Fi        — wants brcm/brcmfmac43430-sdio.bin plus the
 #                            NVRAM staged above
 #   hci_uart  Bluetooth    — pulls in btbcm, which wants the .hcd
-for mod in zinitix brcmfmac hci_uart; do
+#   nanohub   sensor hub   — stock hub firmware; never flashes it
+#
+# bcm4775-bbd is intentionally not loaded here. Its transport powers the GPS
+# receiver, but it is not useful until an open userspace location engine exists.
+for mod in zinitix brcmfmac hci_uart nanohub; do
 	if modprobe "$mod" 2>/dev/null; then
 		log "loaded $mod"
 	else
 		log "could not load $mod"
 	fi
 done
+
+# SDIO probes asynchronously. Do not delay Erlang waiting for wlan0:
+# VintageNet handles the interface appearing later. Applications should set
+# a stable MAC through their VintageNet configuration (hello_watch uses
+# HelloWatch.WiFi.stable_mac/0, derived from the eMMC CID).
+log "firmware staged and module loading finished; continuing without waiting for wlan0"
 
 exit 0
