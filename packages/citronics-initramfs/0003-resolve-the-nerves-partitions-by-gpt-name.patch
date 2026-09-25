@@ -12,7 +12,7 @@ diff --git a/initramfs/usr/share/citronics-initramfs/functions.sh b/initramfs/us
 index b01b959..87c6d2e 100755
 --- a/initramfs/usr/share/citronics-initramfs/functions.sh
 +++ b/initramfs/usr/share/citronics-initramfs/functions.sh
-@@ -317,6 +317,87 @@ has_unallocated_space() {
+@@ -317,6 +317,91 @@ has_unallocated_space() {
              head -n1 | grep -qi "free space"
  }
  
@@ -79,6 +79,10 @@ index b01b959..87c6d2e 100755
 +
 +    b=${base#/dev/}
 +    ln -sf "$base" /dev/nerves-userdata
++    # Nerves Runtime and official systems address the firmware container
++    # through this conventional alias. Publish both names so automatic
++    # fwup operations work without target-specific application config.
++    ln -sf "$base" /dev/rootdisk0
 +    ln -sf "/dev/mapper/${b}p1" /dev/nerves-boot
 +    ln -sf "/dev/mapper/${b}p2" /dev/nerves-rootfs
 +    ln -sf "/dev/mapper/${b}p3" /dev/nerves-app
@@ -87,7 +91,7 @@ index b01b959..87c6d2e 100755
 +    # watch: the Broadcom Wi-Fi NVRAM and the Bluetooth patch RAM image.
 +    # Both are optional — a missing partition just leaves a dangling
 +    # symlink that erlinit fails to mount and carries on past.
-+    for part in vendor persist; do
++    for part in system vendor persist; do
 +        dev=$(nerves_find_partition "$part") && \
 +            ln -sf "$dev" "/dev/nerves-$part"
 +    done
