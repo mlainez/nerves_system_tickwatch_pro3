@@ -6,6 +6,8 @@
 /.nerves
 build.log
 archive.log
+/tickwatch_pro3.fw
+/tickwatch_pro3.img
 erl_crash.dump
 *.ez
 *.tar.gz
