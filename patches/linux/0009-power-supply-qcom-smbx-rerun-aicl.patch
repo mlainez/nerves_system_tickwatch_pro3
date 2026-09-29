@@ -1,0 +1,33 @@
+From 78cbc1cf0f19a8a03ebfa8b255e6e66609706031 Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Tue, 29 Sep 2026 23:53:16 +0200
+Subject: [PATCH] power: supply: qcom_smbx: re-run AICL after an input collapse
+
+AICL lowers the input current limit whenever VBUS dips, but with
+USBIN_AICL_RERUN_EN clear it never raises it again. A single dip on the
+TicWatch Pro 3 cradle left ICL_STATUS at 25 mA with a healthy 5 V input,
+so the watch ran from its battery while reporting "Charging".
+---
+ drivers/power/supply/qcom_smbx.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/power/supply/qcom_smbx.c b/drivers/power/supply/qcom_smbx.c
+index bf2e2cc..9814f3b 100644
+--- a/drivers/power/supply/qcom_smbx.c
++++ b/drivers/power/supply/qcom_smbx.c
+@@ -869,9 +869,10 @@ static const struct smb_init_register smb_init_seq[] = {
+ 	  .mask = USBIN_AICL_START_AT_MAX_BIT | USBIN_AICL_ADC_EN_BIT |
+ 		  USBIN_AICL_EN_BIT | SUSPEND_ON_COLLAPSE_USBIN_BIT |
+ 		  USBIN_HV_COLLAPSE_RESPONSE_BIT |
+-		  USBIN_LV_COLLAPSE_RESPONSE_BIT,
++		  USBIN_LV_COLLAPSE_RESPONSE_BIT | USBIN_AICL_RERUN_EN_BIT,
+ 	  .val = USBIN_HV_COLLAPSE_RESPONSE_BIT |
+-		 USBIN_LV_COLLAPSE_RESPONSE_BIT | USBIN_AICL_EN_BIT },
++		 USBIN_LV_COLLAPSE_RESPONSE_BIT | USBIN_AICL_EN_BIT |
++		 USBIN_AICL_RERUN_EN_BIT },
+ 	/*
+ 	 * Set pre charge current to default, the OnePlus 6 bootloader
+ 	 * sets this very conservatively.
+-- 
+2.51.0
+
