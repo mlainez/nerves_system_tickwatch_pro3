@@ -20,8 +20,10 @@ watch.
 ## Quickstart
 
 All you need to flash a watch is `fastboot` from Android platform-tools,
-plus `curl` and `gzip`. Enter fastboot mode first: power the watch off,
-then hold the top button while plugging in USB.
+plus `curl` and `gzip`. `flash.sh` runs on Linux and macOS (including the
+stock bash 3.2). On macOS, `brew install android-platform-tools`; on
+Debian/Ubuntu, `apt install fastboot`. Enter fastboot mode first: power the
+watch off, then hold the top button while plugging in USB.
 
 ### Try it without building anything
 
@@ -41,7 +43,7 @@ configured; build your own app for those.
 ### Build and flash your own app
 
 You also need Elixir and Erlang, the `nerves_bootstrap` archive and
-`fwup`. A prebuilt system is published on this repository's GitHub
+`fwup` (`brew install fwup` on macOS). A prebuilt system is published on this repository's GitHub
 releases, so no Buildroot build is needed.
 
 **1. Start from an app.** Clone `hello_watch` (add your Wi-Fi network in

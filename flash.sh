@@ -73,6 +73,9 @@ while [ $# -gt 0 ]; do
 	--wait)
 		[ $# -ge 2 ] || die "--wait needs a value"
 		wait_seconds=$2
+		case "$wait_seconds" in
+		'' | *[!0-9]*) die "--wait needs a number of seconds" ;;
+		esac
 		shift
 		;;
 	-y | --yes) assume_yes=true ;;
@@ -89,7 +92,8 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-command -v fastboot >/dev/null || die "fastboot not found; install Android platform-tools"
+command -v fastboot >/dev/null ||
+	die "fastboot not found; install Android platform-tools (macOS: brew install android-platform-tools)"
 
 sha256() {
 	if command -v sha256sum >/dev/null; then
@@ -99,7 +103,7 @@ sha256() {
 	fi
 }
 
-workdir=$(mktemp -d)
+workdir=$(mktemp -d "${TMPDIR:-/tmp}/ticwatch-flash.XXXXXX")
 trap 'rm -rf "$workdir"' EXIT
 
 # Finds a boot image next to this script, or downloads it, and checks it
@@ -140,7 +144,8 @@ esac
 
 case "$firmware" in
 *.fw)
-	command -v fwup >/dev/null || die "fwup is needed to convert a .fw file"
+	command -v fwup >/dev/null ||
+		die "fwup is needed to convert a .fw file (macOS: brew install fwup)"
 	info "Converting $firmware to a raw image"
 	fwup -a -q -d "$workdir/firmware.img" -i "$firmware" -t complete
 	image="$workdir/firmware.img"
@@ -169,7 +174,7 @@ for ((i = 0; i < wait_seconds; i++)); do
 	[ -n "$(fastboot devices 2>/dev/null)" ] && break
 	sleep 1
 done
-devices=$(fastboot devices 2>/dev/null | awk 'NF' | wc -l)
+devices=$(fastboot devices 2>/dev/null | awk 'NF { n++ } END { print n + 0 }')
 [ "$devices" -ge 1 ] || die "no fastboot device found after ${wait_seconds}s"
 [ "$devices" -eq 1 ] || die "more than one fastboot device connected; unplug the others"
 
