@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Wed, 30 Sep 2026 00:45:20 +0200
+Subject: [PATCH 12/14] arm64: dts: qcom: rover: enable the DSI panel
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../boot/dts/qcom/sdm429w-mobvoi-rover.dts    | 62 +++++++++++++++++++
+ 1 file changed, 62 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+index 3e284b135..3bf59831f 100644
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -205,6 +205,54 @@ &cpu_opp_table_c1 {
+ 	/delete-node/ opp-2016000000;
+ };
+ 
++&mdss {
++	status = "okay";
++};
++
++&mdss_dsi0 {
++	vdda-supply = <&pm660_l6>;
++	vddio-supply = <&pm660_l13>;
++
++	pinctrl-0 = <&mdss_te_default>;
++	pinctrl-names = "default";
++
++	status = "okay";
++
++	/*
++	 * Units ship with either an RM69330 or an ICNA3310; the driver logs
++	 * the display ID it reads so the fitted one can be confirmed.
++	 */
++	panel@0 {
++		compatible = "mobvoi,rover-panel-rm69330";
++		reg = <0>;
++
++		vddio-supply = <&pm660_l13>;
++		enable-gpios = <&tlmm 55 GPIO_ACTIVE_HIGH>;
++		/* Inverted on the board: driving the pin high resets the panel. */
++		reset-gpios = <&tlmm 56 GPIO_ACTIVE_HIGH>;
++
++		pinctrl-0 = <&panel_default>;
++		pinctrl-names = "default";
++
++		port {
++			panel_in: endpoint {
++				remote-endpoint = <&mdss_dsi0_out>;
++			};
++		};
++	};
++};
++
++&mdss_dsi0_out {
++	data-lanes = <0>;
++	remote-endpoint = <&panel_in>;
++};
++
++&mdss_dsi0_phy {
++	vddio-supply = <&pm660_l13>;
++
++	status = "okay";
++};
++
+ &pm660_adc {
+ 	status = "okay";
+ };
+@@ -450,6 +498,20 @@ gpio_keys_default: gpio-keys-default-state {
+ 		bias-pull-up;
+ 	};
+ 
++	mdss_te_default: mdss-te-default-state {
++		pins = "gpio24";
++		function = "mdp_vsync";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
++	panel_default: panel-default-state {
++		pins = "gpio55", "gpio56";
++		function = "gpio";
++		drive-strength = <8>;
++		bias-disable;
++	};
++
+ 	wifi_reg_on: wifi-reg-on-state {
+ 		pins = "gpio72";
+ 		function = "gpio";
+-- 
+2.51.0
+

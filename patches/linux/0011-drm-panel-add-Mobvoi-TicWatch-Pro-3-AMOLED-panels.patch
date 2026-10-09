@@ -1,0 +1,362 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Wed, 30 Sep 2026 00:45:20 +0200
+Subject: [PATCH 11/14] drm/panel: add Mobvoi TicWatch Pro 3 AMOLED panels
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/gpu/drm/panel/Kconfig              |  10 +
+ drivers/gpu/drm/panel/Makefile             |   1 +
+ drivers/gpu/drm/panel/panel-mobvoi-rover.c | 307 +++++++++++++++++++++
+ 3 files changed, 318 insertions(+)
+ create mode 100644 drivers/gpu/drm/panel/panel-mobvoi-rover.c
+
+diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
+index d13c9d01e..b69b1ff40 100644
+--- a/drivers/gpu/drm/panel/Kconfig
++++ b/drivers/gpu/drm/panel/Kconfig
+@@ -502,6 +502,16 @@ config DRM_PANEL_MANTIX_MLAF057WE51
+ 	  has a resolution of 720x1440 pixels, a built in backlight and touch
+ 	  controller.
+ 
++config DRM_PANEL_MOBVOI_ROVER
++	tristate "Mobvoi TicWatch Pro 3 AMOLED panels"
++	depends on OF
++	depends on DRM_MIPI_DSI
++	depends on BACKLIGHT_CLASS_DEVICE
++	help
++	  Say Y here to enable support for the 454x454 command-mode AMOLED
++	  panels (Raydium RM69330 or Chipone ICNA3310) of the Mobvoi
++	  TicWatch Pro 3.
++
+ config DRM_PANEL_MOTOROLA_MOT
+ 	tristate "Atrix 4G and Droid X2 540x960 DSI video mode panel"
+ 	depends on OF
+diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
+index 3ce7407d7..ff479940e 100644
+--- a/drivers/gpu/drm/panel/Makefile
++++ b/drivers/gpu/drm/panel/Makefile
+@@ -49,6 +49,7 @@ obj-$(CONFIG_DRM_PANEL_LG_LG4573) += panel-lg-lg4573.o
+ obj-$(CONFIG_DRM_PANEL_LG_SW43408) += panel-lg-sw43408.o
+ obj-$(CONFIG_DRM_PANEL_LXD_M9189A) += panel-lxd-m9189a.o
+ obj-$(CONFIG_DRM_PANEL_MAGNACHIP_D53E6EA8966) += panel-magnachip-d53e6ea8966.o
++obj-$(CONFIG_DRM_PANEL_MOBVOI_ROVER) += panel-mobvoi-rover.o
+ obj-$(CONFIG_DRM_PANEL_MOTOROLA_MOT) += panel-motorola-mot.o
+ obj-$(CONFIG_DRM_PANEL_NEC_NL8048HL11) += panel-nec-nl8048hl11.o
+ obj-$(CONFIG_DRM_PANEL_NEWVISION_NV3051D) += panel-newvision-nv3051d.o
+diff --git a/drivers/gpu/drm/panel/panel-mobvoi-rover.c b/drivers/gpu/drm/panel/panel-mobvoi-rover.c
+new file mode 100644
+index 000000000..e9179d045
+--- /dev/null
++++ b/drivers/gpu/drm/panel/panel-mobvoi-rover.c
+@@ -0,0 +1,307 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * 454x454 AMOLED command-mode panels of the Mobvoi TicWatch Pro 3 (rover).
++ * Units ship with either a Raydium RM69330 or a Chipone ICNA3310 driver IC;
++ * the init sequences come from Mobvoi's downstream device tree.
++ */
++
++#include <linux/backlight.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
++
++#include <video/mipi_display.h>
++
++#include <drm/drm_mipi_dsi.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_panel.h>
++#include <drm/drm_probe_helper.h>
++
++struct rover_panel_desc {
++	const char *name;
++	void (*init)(struct mipi_dsi_multi_context *ctx);
++	const struct drm_display_mode *mode;
++};
++
++struct rover_panel {
++	struct drm_panel panel;
++	struct mipi_dsi_device *dsi;
++	struct regulator *vddio;
++	struct gpio_desc *enable_gpio;
++	struct gpio_desc *reset_gpio;
++	const struct rover_panel_desc *desc;
++};
++
++static inline struct rover_panel *to_rover_panel(struct drm_panel *panel)
++{
++	return container_of(panel, struct rover_panel, panel);
++}
++
++/* The panel RAM starts 14 columns in: the visible 454 are 0x0e..0x1d3. */
++static void rover_set_window(struct mipi_dsi_multi_context *ctx)
++{
++	mipi_dsi_dcs_set_column_address_multi(ctx, 0x000e, 0x01d3);
++	mipi_dsi_dcs_set_page_address_multi(ctx, 0x0000, 0x01c5);
++}
++
++static void rm69330_init(struct mipi_dsi_multi_context *ctx)
++{
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xfe, 0x01);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0x6a, 0x15);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xfe, 0x00);
++	mipi_dsi_dcs_set_tear_on_multi(ctx, MIPI_DSI_DCS_TEAR_MODE_VBLANK);
++	mipi_dsi_dcs_write_seq_multi(ctx, MIPI_DCS_SET_PIXEL_FORMAT, 0xa7);
++	mipi_dsi_dcs_write_seq_multi(ctx, MIPI_DCS_SET_DISPLAY_BRIGHTNESS, 0xff);
++	rover_set_window(ctx);
++}
++
++static void icna3310_init(struct mipi_dsi_multi_context *ctx)
++{
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xfe, 0x20);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xf4, 0x5a);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xf5, 0x59);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xfe, 0x40);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xc9, 0x15);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xfe, 0xe0);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0x01, 0x02);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0x0a, 0x02);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0x11, 0x20);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0xfe, 0x00);
++	mipi_dsi_dcs_set_tear_on_multi(ctx, MIPI_DSI_DCS_TEAR_MODE_VBLANK);
++	mipi_dsi_dcs_write_seq_multi(ctx, MIPI_DCS_SET_DISPLAY_BRIGHTNESS, 0xff);
++	mipi_dsi_dcs_write_seq_multi(ctx, MIPI_DCS_WRITE_CONTROL_DISPLAY, 0x20);
++	mipi_dsi_dcs_write_seq_multi(ctx, 0x63, 0xff);
++	rover_set_window(ctx);
++}
++
++static void rover_reset(struct rover_panel *ctx)
++{
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(1000, 2000);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	usleep_range(12000, 13000);
++	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
++	usleep_range(12000, 13000);
++}
++
++static void rover_log_id(struct rover_panel *ctx)
++{
++	u8 id[3] = { };
++	int ret;
++
++	ret = mipi_dsi_set_maximum_return_packet_size(ctx->dsi, sizeof(id));
++	if (ret >= 0)
++		ret = mipi_dsi_dcs_read(ctx->dsi, MIPI_DCS_GET_DISPLAY_ID, id,
++					sizeof(id));
++	if (ret < 0)
++		dev_warn(&ctx->dsi->dev, "cannot read display ID: %d\n", ret);
++	else
++		dev_info(&ctx->dsi->dev, "%s: display ID %3ph\n",
++			 ctx->desc->name, id);
++}
++
++static int rover_prepare(struct drm_panel *panel)
++{
++	struct rover_panel *ctx = to_rover_panel(panel);
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
++	int ret;
++
++	ret = regulator_enable(ctx->vddio);
++	if (ret)
++		return ret;
++
++	gpiod_set_value_cansleep(ctx->enable_gpio, 1);
++	usleep_range(5000, 6000);
++	rover_reset(ctx);
++	rover_log_id(ctx);
++
++	ctx->dsi->mode_flags |= MIPI_DSI_MODE_LPM;
++	ctx->desc->init(&dsi_ctx);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_ENTER_NORMAL_MODE);
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xc4, 0x00);
++	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
++	mipi_dsi_msleep(&dsi_ctx, 120);
++	mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
++
++	if (dsi_ctx.accum_err) {
++		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++		gpiod_set_value_cansleep(ctx->enable_gpio, 0);
++		regulator_disable(ctx->vddio);
++	}
++
++	return dsi_ctx.accum_err;
++}
++
++static int rover_unprepare(struct drm_panel *panel)
++{
++	struct rover_panel *ctx = to_rover_panel(panel);
++	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
++
++	ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfe, 0x00);
++	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
++	mipi_dsi_msleep(&dsi_ctx, 40);
++	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
++	mipi_dsi_msleep(&dsi_ctx, 120);
++	/* Deep standby: the panel then only leaves it through a reset. */
++	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x4f, 0x01);
++
++	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
++	gpiod_set_value_cansleep(ctx->enable_gpio, 0);
++	regulator_disable(ctx->vddio);
++
++	return 0;
++}
++
++static const struct drm_display_mode rover_mode = {
++	.clock = (454 + 20 + 20 + 40) * (454 + 20 + 4 + 12) * 60 / 1000,
++	.hdisplay = 454,
++	.hsync_start = 454 + 20,
++	.hsync_end = 454 + 20 + 20,
++	.htotal = 454 + 20 + 20 + 40,
++	.vdisplay = 454,
++	.vsync_start = 454 + 20,
++	.vsync_end = 454 + 20 + 4,
++	.vtotal = 454 + 20 + 4 + 12,
++	.width_mm = 35,
++	.height_mm = 35,
++	.type = DRM_MODE_TYPE_DRIVER,
++};
++
++static int rover_get_modes(struct drm_panel *panel,
++			   struct drm_connector *connector)
++{
++	return drm_connector_helper_get_modes_fixed(connector,
++						    to_rover_panel(panel)->desc->mode);
++}
++
++static const struct drm_panel_funcs rover_panel_funcs = {
++	.prepare = rover_prepare,
++	.unprepare = rover_unprepare,
++	.get_modes = rover_get_modes,
++};
++
++static int rover_bl_update_status(struct backlight_device *bl)
++{
++	struct mipi_dsi_device *dsi = bl_get_data(bl);
++	int ret;
++
++	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
++	ret = mipi_dsi_dcs_set_display_brightness(dsi,
++						  backlight_get_brightness(bl));
++	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
++
++	return ret;
++}
++
++static const struct backlight_ops rover_bl_ops = {
++	.update_status = rover_bl_update_status,
++};
++
++static int rover_probe(struct mipi_dsi_device *dsi)
++{
++	struct device *dev = &dsi->dev;
++	const struct backlight_properties props = {
++		.type = BACKLIGHT_RAW,
++		.brightness = 255,
++		.max_brightness = 255,
++	};
++	struct rover_panel *ctx;
++	int ret;
++
++	ctx = devm_drm_panel_alloc(dev, struct rover_panel, panel,
++				   &rover_panel_funcs, DRM_MODE_CONNECTOR_DSI);
++	if (IS_ERR(ctx))
++		return PTR_ERR(ctx);
++
++	ctx->desc = of_device_get_match_data(dev);
++	ctx->dsi = dsi;
++	mipi_dsi_set_drvdata(dsi, ctx);
++
++	ctx->vddio = devm_regulator_get(dev, "vddio");
++	if (IS_ERR(ctx->vddio))
++		return dev_err_probe(dev, PTR_ERR(ctx->vddio),
++				     "failed to get vddio regulator\n");
++
++	/*
++	 * Left as the bootloader configured them, so the splash stays up
++	 * until the first modeset.
++	 */
++	ctx->enable_gpio = devm_gpiod_get(dev, "enable", GPIOD_ASIS);
++	if (IS_ERR(ctx->enable_gpio))
++		return dev_err_probe(dev, PTR_ERR(ctx->enable_gpio),
++				     "failed to get enable-gpios\n");
++
++	ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_ASIS);
++	if (IS_ERR(ctx->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ctx->reset_gpio),
++				     "failed to get reset-gpios\n");
++
++	dsi->lanes = 1;
++	dsi->format = MIPI_DSI_FMT_RGB888;
++	dsi->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS;
++
++	ctx->panel.prepare_prev_first = true;
++	ctx->panel.backlight = devm_backlight_device_register(dev, dev_name(dev),
++							      dev, dsi, &rover_bl_ops,
++							      &props);
++	if (IS_ERR(ctx->panel.backlight))
++		return dev_err_probe(dev, PTR_ERR(ctx->panel.backlight),
++				     "failed to create backlight\n");
++
++	drm_panel_add(&ctx->panel);
++
++	ret = mipi_dsi_attach(dsi);
++	if (ret < 0) {
++		drm_panel_remove(&ctx->panel);
++		return dev_err_probe(dev, ret, "failed to attach to DSI host\n");
++	}
++
++	return 0;
++}
++
++static void rover_remove(struct mipi_dsi_device *dsi)
++{
++	struct rover_panel *ctx = mipi_dsi_get_drvdata(dsi);
++	int ret;
++
++	ret = mipi_dsi_detach(dsi);
++	if (ret < 0)
++		dev_err(&dsi->dev, "failed to detach from DSI host: %d\n", ret);
++
++	drm_panel_remove(&ctx->panel);
++}
++
++static const struct rover_panel_desc rm69330_desc = {
++	.name = "rm69330",
++	.init = rm69330_init,
++	.mode = &rover_mode,
++};
++
++static const struct rover_panel_desc icna3310_desc = {
++	.name = "icna3310",
++	.init = icna3310_init,
++	.mode = &rover_mode,
++};
++
++static const struct of_device_id rover_of_match[] = {
++	{ .compatible = "mobvoi,rover-panel-rm69330", .data = &rm69330_desc },
++	{ .compatible = "mobvoi,rover-panel-icna3310", .data = &icna3310_desc },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rover_of_match);
++
++static struct mipi_dsi_driver rover_driver = {
++	.probe = rover_probe,
++	.remove = rover_remove,
++	.driver = {
++		.name = "panel-mobvoi-rover",
++		.of_match_table = rover_of_match,
++	},
++};
++module_mipi_dsi_driver(rover_driver);
++
++MODULE_DESCRIPTION("DRM driver for the Mobvoi TicWatch Pro 3 AMOLED panels");
++MODULE_LICENSE("GPL");
+-- 
+2.51.0
+

@@ -90,3 +90,9 @@ CONFIG_FONT_TER16x32=y
 # from a stripped Image — but it makes every object file several times
 # larger and slows the build down for nothing.
 CONFIG_DEBUG_INFO_NONE=y
+
+# DSI panel: the SDM429W's 12nm DSI PHY and the rover's AMOLED panel driver,
+# so the display pipeline can be powered down instead of held on by the
+# bootloader framebuffer.
+CONFIG_DRM_MSM_DSI_12NM_PHY=y
+CONFIG_DRM_PANEL_MOBVOI_ROVER=m

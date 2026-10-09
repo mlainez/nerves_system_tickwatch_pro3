@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Marc Lainez <marc.lainez@gmail.com>
+Date: Wed, 30 Sep 2026 06:14:50 +0200
+Subject: [PATCH 13/14] soc: qcom: ubwc: add SDM429, SDM429W and SDM439
+
+They share the MSM8937 display controller; without an entry the MDSS
+probe fails with -EINVAL.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/soc/qcom/ubwc_config.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/soc/qcom/ubwc_config.c b/drivers/soc/qcom/ubwc_config.c
+index a7dcf298f..6c900fa47 100644
+--- a/drivers/soc/qcom/ubwc_config.c
++++ b/drivers/soc/qcom/ubwc_config.c
+@@ -272,6 +272,9 @@ static const struct of_device_id qcom_ubwc_configs[] __maybe_unused = {
+ 	{ .compatible = "qcom,sc8180x", .data = &sc8180x_data, },
+ 	{ .compatible = "qcom,sc8280xp", .data = &sc8280xp_data, },
+ 	{ .compatible = "qcom,sda660", .data = &msm8937_data },
++	{ .compatible = "qcom,sdm429", .data = &msm8937_data },
++	{ .compatible = "qcom,sdm429w", .data = &msm8937_data },
++	{ .compatible = "qcom,sdm439", .data = &msm8937_data },
+ 	{ .compatible = "qcom,sdm450", .data = &msm8937_data },
+ 	{ .compatible = "qcom,sdm630", .data = &msm8937_data },
+ 	{ .compatible = "qcom,sdm632", .data = &msm8937_data },
+-- 
+2.51.0
+

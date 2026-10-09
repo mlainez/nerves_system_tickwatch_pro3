@@ -10,7 +10,7 @@ watch.
 | GPU | Adreno 504 — present, not used (see [Known gaps](#known-gaps)) |
 | Memory | 1 GB LPDDR3 |
 | Storage | 8 GB eMMC; firmware lives inside the stock `userdata` partition |
-| Display | 454×454 AMOLED, via lk2nd's framebuffer and SimpleDRM |
+| Display | 454×454 AMOLED — SimpleDRM at boot, then MSM DRM with a native DSI panel driver |
 | Touch | Zinitix BT541 |
 | Linux | [`msm89x7-mainline/linux`](https://github.com/msm89x7-mainline/linux) 7.1.3-r1 |
 | Bootloader | lk2nd (`msm8952` target) → `extlinux/extlinux.conf` on the boot subpartition |
@@ -43,8 +43,8 @@ in this repository carries both. See
 Everything below is inherited from the mainline port; this system does
 not change what the kernel supports.
 
-Working: boot, eMMC, USB networking, display (SimpleDRM), touchscreen,
-battery and charging, Wi-Fi, Bluetooth.
+Working: boot, eMMC, USB networking, display, touchscreen, battery and
+charging, Wi-Fi, Bluetooth.
 
 New and awaiting hardware validation: heart rate, accelerometer, gyroscope
 and the stock-stack GPS compatibility path. Not working: audio, cellular
@@ -286,11 +286,13 @@ See the [downstream hub driver](https://github.com/ONE-WearOS/android_kernel_mob
   expects. If it finds nothing it says so in the log, and the interface
   will load but not come up. The same applies to the Bluetooth `.hcd`
   patch RAM image.
-- **No GPU.** There is no KMS driver for this panel — mainline has no
-  panel driver for it, so the device tree hands the kernel the
-  framebuffer lk2nd set up and SimpleDRM binds it. That means no
-  brightness control and no vsync, and nothing ever asks the Adreno 504
-  for firmware. A graphics stack on top of this would go through Mesa's
+- **No GPU.** The display boots on the framebuffer lk2nd set up, bound
+  by SimpleDRM. Once Erlang is up, `nerves_uevent` autoloads `msm` and
+  `panel-mobvoi-rover` (patches 0010–0014: a 12nm DSI PHY/PLL driver and
+  a driver for the RM69330/ICNA3310 panels), which take over the display
+  and can power the panel and pipeline down when `/dev/fb0` is blanked.
+  Brightness is a DCS backlight under `/sys/class/backlight`. Nothing asks the Adreno
+  504 for firmware, so a graphics stack would go through Mesa's
   `kms_swrast` and render on the CPU.
 - **Audio remains unsupported.** Heart rate, motion sensors and GPS now have
   kernel/userspace paths in the build, but require on-device validation;
