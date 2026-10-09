@@ -56,6 +56,24 @@ The stock bootloader will not chain-load a foreign kernel, so lk2nd goes
 on `boot` and the Nerves firmware into `userdata`. Both `lk2nd.img` and
 `dtbo.img` are in this repository and only need flashing once.
 
+`flash.sh` does all of it. Put the watch in fastboot mode (power off,
+then hold the top button while plugging in USB) and run:
+
+```sh
+./flash.sh --unlock my_app.img    # first install: unlock, dtbo, lk2nd, firmware
+./flash.sh --app-only my_app.img  # reinstall firmware only
+```
+
+It takes the raw image from `mix firmware.image` or a `.fw` file
+(converted with `fwup`), checks `lk2nd.img` and `dtbo.img` against their
+known hashes, downloading them from the latest release if they are not
+next to the script, and asks before erasing anything. From a Nerves app
+that depends on this system, it is at
+`deps/nerves_system_tickwatch_pro3/flash.sh`. `./flash.sh --help` lists
+every option.
+
+The same steps by hand:
+
 ```sh
 # Enter fastboot: power off, then hold the top button while plugging in USB.
 fastboot flashing unlock          # once per watch — this erases it
