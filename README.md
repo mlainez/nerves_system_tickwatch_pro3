@@ -17,6 +17,74 @@ watch.
 | Console | On-device display (`tty1`), or telnet over USB from the initramfs |
 | Wi-Fi / BT | Broadcom BCM43430A1 — `brcmfmac` over SDIO, `hci_uart` over UART |
 
+## Quickstart
+
+All you need to flash a watch is `fastboot` from Android platform-tools,
+plus `curl` and `gzip`. Enter fastboot mode first: power the watch off,
+then hold the top button while plugging in USB.
+
+### Try it without building anything
+
+```sh
+git clone https://github.com/mlainez/nerves_system_tickwatch_pro3.git
+cd nerves_system_tickwatch_pro3
+./flash.sh --unlock
+```
+
+With no firmware argument, `flash.sh` downloads the latest prebuilt
+[`hello_watch`](https://github.com/mlainez/hello_watch) image — a demo
+clock face with touch and sensor pages — and flashes it together with
+lk2nd and `dtbo.img`. `--unlock` unlocks the bootloader first if needed,
+**which wipes the watch**. The demo has no Wi-Fi network or SSH key
+configured; build your own app for those.
+
+### Build and flash your own app
+
+You also need Elixir and Erlang, the `nerves_bootstrap` archive and
+`fwup`. A prebuilt system is published on this repository's GitHub
+releases, so no Buildroot build is needed.
+
+**1. Start from an app.** Clone `hello_watch` (add your Wi-Fi network in
+`config/target.secret.exs`; your `~/.ssh` public keys are authorized
+automatically), or add this system to your own Nerves app's `mix.exs`
+with the target name `ticwatch_pro3`:
+
+```elixir
+{:nerves_system_tickwatch_pro3,
+ github: "mlainez/nerves_system_tickwatch_pro3",
+ tag: "v0.2.0",
+ runtime: false,
+ targets: :ticwatch_pro3}
+```
+
+**2. Build a raw image.**
+
+```sh
+export MIX_TARGET=ticwatch_pro3
+mix deps.get          # also downloads the prebuilt system
+mix firmware
+mix firmware.image    # writes <app>.img
+```
+
+**3. Flash it** from fastboot mode:
+
+```sh
+# First install: unlock if needed, then dtbo, lk2nd and the firmware.
+deps/nerves_system_tickwatch_pro3/flash.sh --unlock my_app.img
+
+# Reinstalling firmware over USB later, keeping lk2nd:
+deps/nerves_system_tickwatch_pro3/flash.sh --app-only my_app.img
+```
+
+**4. Update over the network.** Once the watch is running, `mix upload`
+(or `mix upload <ip>`) installs new firmware as with any Nerves device.
+
+`flash.sh` also takes a `.fw` file, a `.img.gz`/`.img.xz`, or an https URL
+to any of these, and asks before erasing anything; `--help` lists every
+option. It only writes the `dtbo`, `boot` and `userdata` partitions — the
+stock `vendor` and `persist` partitions, which hold this watch's Wi-Fi and
+Bluetooth calibration data, are left alone.
+
 ## One image, two watches
 
 The TicWatch Pro 3 ships in two variants, and they do not identify
@@ -40,11 +108,12 @@ in this repository carries both. See
 
 ## Status
 
-Everything below is inherited from the mainline port; this system does
-not change what the kernel supports.
+The kernel is the `msm89x7-mainline` port plus the patches in
+`patches/linux`: device tree fixes for Wi-Fi, the sensor hub and GPS, a
+charger fix, and the native DSI display drivers.
 
-Working: boot, eMMC, USB networking, display, touchscreen, battery and
-charging, Wi-Fi, Bluetooth.
+Working: boot, eMMC, USB networking, display (including panel power-down),
+touchscreen, battery and charging, Wi-Fi, Bluetooth.
 
 New and awaiting hardware validation: heart rate, accelerometer, gyroscope
 and the stock-stack GPS compatibility path. Not working: audio, cellular
@@ -54,25 +123,12 @@ and the stock-stack GPS compatibility path. Not working: audio, cellular
 
 The stock bootloader will not chain-load a foreign kernel, so lk2nd goes
 on `boot` and the Nerves firmware into `userdata`. Both `lk2nd.img` and
-`dtbo.img` are in this repository and only need flashing once.
+`dtbo.img` are in this repository and attached to each release, and only
+need flashing once.
 
-`flash.sh` does all of it. Put the watch in fastboot mode (power off,
-then hold the top button while plugging in USB) and run:
-
-```sh
-./flash.sh --unlock my_app.img    # first install: unlock, dtbo, lk2nd, firmware
-./flash.sh --app-only my_app.img  # reinstall firmware only
-```
-
-It takes the raw image from `mix firmware.image` or a `.fw` file
-(converted with `fwup`), checks `lk2nd.img` and `dtbo.img` against their
-known hashes, downloading them from the latest release if they are not
-next to the script, and asks before erasing anything. From a Nerves app
-that depends on this system, it is at
-`deps/nerves_system_tickwatch_pro3/flash.sh`. `./flash.sh --help` lists
-every option.
-
-The same steps by hand:
+`flash.sh` (see [Quickstart](#quickstart)) checks both images against
+their known hashes, downloading them from the latest release if they are
+not next to the script. The same steps by hand:
 
 ```sh
 # Enter fastboot: power off, then hold the top button while plugging in USB.
@@ -132,25 +188,30 @@ aliases never have to know which slot is live.
 If you would rather pin the device explicitly, `rootfs=` and `bootpart=`
 on the kernel command line still work and take precedence.
 
-## Building
+## Building the system
 
-You need the Nerves toolchain prerequisites for your platform (see the
+Apps normally use the prebuilt system from the GitHub release. Building
+it yourself is only needed when changing the system, and requires the
+Nerves toolchain prerequisites for your platform (see the
 [Nerves installation guide](https://hexdocs.pm/nerves/installation.html)):
-Erlang, Elixir, `fwup`, `squashfs-tools`, `cmake`, `autoconf`, `bc` and
-`libssl-dev`.
+`squashfs-tools`, `cmake`, `autoconf`, `bc` and `libssl-dev` on top of the
+Quickstart tools.
 
-```bash
-mix archive.install hex nerves_bootstrap
+Check this repository out next to your app and point the dependency at it
+with `nerves: [compile: true]`:
 
-# A throw-away app to build against.
-mix nerves.new watch_demo --target ticwatch_pro3
-cd watch_demo
-
-export MIX_TARGET=ticwatch_pro3
-mix deps.get      # pulls the toolchain (~250 MB), Buildroot and the kernel
-mix firmware      # first build is 30–60 min; rebuilds are incremental
-mix firmware.image # raw .img for fastboot
+```elixir
+{:nerves_system_tickwatch_pro3,
+ path: "../nerves_system_tickwatch_pro3",
+ runtime: false,
+ targets: :ticwatch_pro3,
+ nerves: [compile: true]}
 ```
+
+Then `mix deps.get` and `mix firmware` as usual. The first build pulls the
+toolchain (~250 MB), Buildroot and the kernel and takes 30–60 minutes;
+rebuilds are incremental. `mix nerves.artifact` in this repository packs a
+build into the tarball that releases publish.
 
 Useful side channels:
 
@@ -218,10 +279,10 @@ instead (see `linux-nerves.fragment`).
 ## Driver bring-up
 
 Nerves has no init system — `erlinit` is PID 1 and starts the BEAM, and
-nothing else runs. There is no udev either, so nothing acts on the SDIO
-and serdev uevents that would normally autoload a driver. Left alone this
-watch boots to a working IEx prompt with no touchscreen, no Wi-Fi and no
-Bluetooth.
+nothing else runs. There is no udev either: `nerves_uevent` autoloads
+modules by modalias once Erlang is up (that is how the display drivers
+load), but nothing acts on uevents before that, and nothing orders module
+loading after the firmware they need is in place.
 
 `/usr/sbin/ticwatch-bringup` is the one place that ordering is expressed.
 `erlinit` runs it through `--pre-run-exec`, which happens after the `-m`
@@ -231,7 +292,7 @@ mounts and before Erlang starts:
    `/mnt/vendor` and `/mnt/persist` partitions
 2. symlink them into a tmpfs under the names `brcmfmac` and `btbcm` ask
    for, and point `firmware_class.path` at it
-3. `modprobe zinitix brcmfmac hci_uart`
+3. `modprobe zinitix brcmfmac hci_uart nanohub`
 
 The script does not wait for `wlan0` before starting Erlang. VintageNet
 handles the interface appearing asynchronously. Applications should configure
@@ -309,18 +370,21 @@ See the [downstream hub driver](https://github.com/ONE-WearOS/android_kernel_mob
   `panel-mobvoi-rover` (patches 0010–0014: a 12nm DSI PHY/PLL driver and
   a driver for the RM69330/ICNA3310 panels), which take over the display
   and can power the panel and pipeline down when `/dev/fb0` is blanked.
-  Brightness is a DCS backlight under `/sys/class/backlight`. Nothing asks the Adreno
-  504 for firmware, so a graphics stack would go through Mesa's
-  `kms_swrast` and render on the CPU.
+  Brightness is a DCS backlight under `/sys/class/backlight`. Nothing asks
+  the Adreno 504 for firmware, so a graphics stack would go through
+  Mesa's `kms_swrast` and render on the CPU.
 - **Audio remains unsupported.** Heart rate, motion sensors and GPS now have
   kernel/userspace paths in the build, but require on-device validation;
   PM660 electrical and internal-temperature interfaces are also exposed.
 - **No cellular** on the LTE watch. The modem is not brought up; the
   Qualcomm remoteproc/QRTR stack that `nerves_system_fp3` carries would
   be the starting point.
-- **Time does not survive a reboot.** The PMIC RTC cannot be written.
-  postmarketOS solves this with `swclock-offset`; on Nerves that belongs
-  in an OTP application.
+- **The PMIC RTC cannot be written.** Its counter keeps running while
+  the watch is off, but Linux cannot set it, so the system clock alone
+  does not survive a reboot. postmarketOS solves this with
+  `swclock-offset`; on Nerves it belongs in the application —
+  `hello_watch`'s `HelloWatch.PmicRtc` is a `NervesTime` RTC that stores
+  the offset on the data partition.
 
 ## Acknowledgements
 

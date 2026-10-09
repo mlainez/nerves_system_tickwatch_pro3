@@ -2,6 +2,7 @@
 #
 # Flash Nerves firmware onto a Mobvoi TicWatch Pro 3 over fastboot.
 #
+#   ./flash.sh                     # latest prebuilt hello_watch image
 #   ./flash.sh my_app.img          # lk2nd + dtbo + firmware (first install)
 #   ./flash.sh --app-only my_app.img
 #   ./flash.sh my_app.fw           # converted to a raw image with fwup
@@ -12,6 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 RELEASE_URL="https://github.com/mlainez/nerves_system_tickwatch_pro3/releases/latest/download"
+DEMO_URL="https://github.com/mlainez/hello_watch/releases/latest/download/hello_watch.img.gz"
 
 LK2ND_SHA256=69abc759560e55602d3697b368a5f33c08507dc66745ab944396aa8595968ed6
 DTBO_SHA256=10a2d1bed002355fe903d5c73f82df579a148ec9129ec78c772d3f7eddba9cd4
@@ -25,7 +27,7 @@ firmware=""
 
 usage() {
 	cat <<EOF
-Usage: $(basename "$0") [options] <firmware.img|firmware.fw>
+Usage: $(basename "$0") [options] [firmware]
 
 Flashes the TicWatch Pro 3 from fastboot mode. Enter it by powering the
 watch off, then holding the top button while plugging in USB.
@@ -44,9 +46,13 @@ Options:
   -y, --yes       Do not ask for confirmation
   -h, --help      Show this help
 
-The firmware image comes from 'mix firmware.image' in your Nerves app. A .fw
-file is converted with fwup. lk2nd.img and dtbo.img are taken from next to
-this script, or downloaded from the latest GitHub release.
+firmware is a raw image from 'mix firmware.image' in your Nerves app, a
+.img.gz or .img.xz of one, a .fw file (converted with fwup), or an https://
+URL to any of these. Without it, the latest prebuilt hello_watch image is
+downloaded from GitHub — a demo clock face with no Wi-Fi or SSH configured.
+
+lk2nd.img and dtbo.img are taken from next to this script, or downloaded
+from the latest GitHub release.
 EOF
 }
 
@@ -83,11 +89,6 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-[ -n "$firmware" ] || {
-	usage >&2
-	exit 1
-}
-[ -f "$firmware" ] || die "firmware file not found: $firmware"
 command -v fastboot >/dev/null || die "fastboot not found; install Android platform-tools"
 
 sha256() {
@@ -117,11 +118,42 @@ boot_image() {
 	echo "$path"
 }
 
+demo=false
+if [ -z "$firmware" ]; then
+	firmware=$DEMO_URL
+	demo=true
+	info "No firmware given; using the latest prebuilt hello_watch image"
+fi
+
+source_name=$(basename "${firmware%%\?*}")
+
+case "$firmware" in
+http://* | https://*)
+	info "Downloading $firmware"
+	local_firmware="$workdir/$source_name"
+	curl -fL --progress-bar -o "$local_firmware" "$firmware" ||
+		die "could not download $firmware"
+	firmware=$local_firmware
+	;;
+*) [ -f "$firmware" ] || die "firmware file not found: $firmware" ;;
+esac
+
 case "$firmware" in
 *.fw)
 	command -v fwup >/dev/null || die "fwup is needed to convert a .fw file"
 	info "Converting $firmware to a raw image"
 	fwup -a -q -d "$workdir/firmware.img" -i "$firmware" -t complete
+	image="$workdir/firmware.img"
+	;;
+*.gz)
+	info "Decompressing $(basename "$firmware")"
+	gzip -dc "$firmware" >"$workdir/firmware.img"
+	image="$workdir/firmware.img"
+	;;
+*.xz)
+	command -v xz >/dev/null || die "xz is needed to decompress $firmware"
+	info "Decompressing $(basename "$firmware")"
+	xz -dc "$firmware" >"$workdir/firmware.img"
 	image="$workdir/firmware.img"
 	;;
 *) image=$firmware ;;
@@ -161,9 +193,9 @@ fi
 
 if ! $assume_yes; then
 	if $app_only; then
-		echo "This will overwrite userdata with $firmware, erasing everything in it."
+		echo "This will overwrite userdata with $source_name, erasing everything in it."
 	else
-		echo "This will overwrite dtbo, boot (with lk2nd) and userdata with $firmware,"
+		echo "This will overwrite dtbo, boot (with lk2nd) and userdata with $source_name,"
 		echo "erasing everything in userdata."
 	fi
 	read -r -p "Continue? [y/N] " answer
@@ -188,4 +220,8 @@ if $reboot; then
 	fastboot reboot
 fi
 
-info "Done. Later updates can go over the network with 'mix upload'."
+if $demo; then
+	info "Done. The demo image has no Wi-Fi or SSH; build your own app for those."
+else
+	info "Done. Later updates can go over the network with 'mix upload'."
+fi
