@@ -1,0 +1,37 @@
+From 1a7f182cf10d6ff633ea00186534bffa208648be Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Thu, 15 Oct 2026 09:38:36 +0000
+Subject: [PATCH] i2c: qup: don't leak a clock enable on resume while runtime
+ suspended
+
+qup_i2c_suspend() leaves the clocks alone when the controller is already
+runtime suspended, but qup_i2c_resume() enables them unconditionally.
+The device stays runtime suspended, so nothing disables them again: each
+system suspend taken while the bus is idle leaves the core and iface
+clocks enabled once more, and from the first one on they never turn off.
+
+Only enable the clocks on resume when suspend disabled them.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+ drivers/i2c/busses/i2c-qup.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/i2c/busses/i2c-qup.c b/drivers/i2c/busses/i2c-qup.c
+index a0e076f..6aa16d1 100644
+--- a/drivers/i2c/busses/i2c-qup.c
++++ b/drivers/i2c/busses/i2c-qup.c
+@@ -1988,6 +1988,10 @@ static int qup_i2c_suspend(struct device *device)
+ 
+ static int qup_i2c_resume(struct device *device)
+ {
++	/* Suspend only turned the clocks off if runtime PM had them on. */
++	if (pm_runtime_suspended(device))
++		return 0;
++
+ 	qup_i2c_pm_resume_runtime(device);
+ 	pm_request_autosuspend(device);
+ 	return 0;
+-- 
+2.43.0
+

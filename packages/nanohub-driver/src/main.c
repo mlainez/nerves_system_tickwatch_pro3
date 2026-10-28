@@ -2364,7 +2364,13 @@ int nanohub_suspend(struct iio_dev *iio_dev)
 				break;
 			usleep_range(10, 15);
 		}
-		if (cnt < max_cnt) {
+		/*
+		 * A hub in error has nothing to deliver, and a failed one can
+		 * hold IRQ1 asserted for good: waiting on it would keep the
+		 * whole system awake. The IRQs are edge triggered, so arming
+		 * them as wakeups is still harmless.
+		 */
+		if (cnt < max_cnt || nanohub_get_state(data) == ST_ERROR) {
 			dev_dbg(&iio_dev->dev, "nanohub: %s: cnt=%d\n",
 				__func__, cnt);
 			enable_irq_wake(data->irq1);

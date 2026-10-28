@@ -1,0 +1,97 @@
+From 3ed8aadcdc68f5c1c2fe6047c60d9ad1b6ff2ee6 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Thu, 15 Oct 2026 09:42:58 +0000
+Subject: [PATCH] irqchip/qcom-mpm: program the RPM's wakeup timer
+
+The vMPM starts with a 64-bit arch counter value at which the RPM wakes
+the APSS from deep sleep. The driver never writes it, so it holds
+whatever the boot left there (zero on MSM8937), and once the GIC is off
+the RPM either wakes the APSS at once or never wakes it for a timer.
+
+Write the soonest timer of any online CPU before handing over to the
+RPM, as the downstream driver did, or no timer at all in s2idle, where
+only wakeup interrupts should end the sleep.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+ drivers/irqchip/irq-qcom-mpm.c | 36 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/drivers/irqchip/irq-qcom-mpm.c b/drivers/irqchip/irq-qcom-mpm.c
+index 1813205..ed00ffc 100644
+--- a/drivers/irqchip/irq-qcom-mpm.c
++++ b/drivers/irqchip/irq-qcom-mpm.c
+@@ -4,6 +4,7 @@
+  * Copyright (c) 2010-2020, The Linux Foundation. All rights reserved.
+  */
+ 
++#include <linux/cpuidle.h>
+ #include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
+@@ -12,6 +13,7 @@
+ #include <linux/irqchip.h>
+ #include <linux/irqdomain.h>
+ #include <linux/mailbox_client.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+@@ -21,6 +23,8 @@
+ #include <linux/slab.h>
+ #include <linux/soc/qcom/irq.h>
+ #include <linux/spinlock.h>
++#include <linux/suspend.h>
++#include <clocksource/arm_arch_timer.h>
+ 
+ /*
+  * This is the driver for Qualcomm MPM (MSM Power Manager) interrupt controller,
+@@ -292,6 +296,36 @@ static irqreturn_t qcom_mpm_handler(int irq, void *dev_id)
+ 	return ret;
+ }
+ 
++/*
++ * The first two words of the vMPM are the arch counter value at which the
++ * RPM wakes the APSS from deep sleep, if no MPM pin has: the soonest timer
++ * of any CPU, or never in s2idle, where only wakeup interrupts count.
++ */
++static void mpm_set_wakeup_timer(struct qcom_mpm_priv *priv)
++{
++	u64 wakeup = U64_MAX;
++	ktime_t next = KTIME_MAX;
++	s64 delta;
++	int cpu;
++
++	if (!idle_should_enter_s2idle()) {
++		for_each_online_cpu(cpu) {
++			struct cpuidle_device *dev = per_cpu(cpuidle_devices, cpu);
++			ktime_t t = dev ? READ_ONCE(dev->next_hrtimer) : 0;
++
++			if (t < next)
++				next = t;
++		}
++
++		delta = max_t(s64, ktime_to_ns(ktime_sub(next, ktime_get())), 0);
++		wakeup = arch_timer_read_counter() +
++			 mul_u64_u32_div(delta, arch_timer_get_rate(), NSEC_PER_SEC);
++	}
++
++	writel_relaxed(lower_32_bits(wakeup), priv->base);
++	writel_relaxed(upper_32_bits(wakeup), priv->base + 4);
++}
++
+ static int mpm_pd_power_off(struct generic_pm_domain *genpd)
+ {
+ 	struct qcom_mpm_priv *priv = container_of(genpd, struct qcom_mpm_priv,
+@@ -301,6 +335,8 @@ static int mpm_pd_power_off(struct generic_pm_domain *genpd)
+ 	for (i = 0; i < priv->reg_stride; i++)
+ 		qcom_mpm_write(priv, MPM_REG_STATUS, i, 0);
+ 
++	mpm_set_wakeup_timer(priv);
++
+ 	/* Notify RPM to write vMPM into HW */
+ 	ret = mbox_send_message(priv->mbox_chan, NULL);
+ 	if (ret < 0)
+-- 
+2.43.0
+

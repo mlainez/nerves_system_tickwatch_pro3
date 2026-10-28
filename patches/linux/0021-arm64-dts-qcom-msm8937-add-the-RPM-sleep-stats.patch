@@ -1,0 +1,33 @@
+From 56b2867bbdbb0d7163f2c7dc28774f6f03f77cc5 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Thu, 15 Oct 2026 09:40:07 +0000
+Subject: [PATCH] arm64: dts: qcom: msm8937: add the RPM sleep stats
+
+The RPM keeps counts of its XO shutdown ("vlow") and VDD minimisation
+("vmin") sleep modes in its code RAM, behind an offset at 0x290014 as on
+MSM8996. Describe them for qcom_stats, which shows them in debugfs.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+ arch/arm64/boot/dts/qcom/msm8937.dtsi | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8937.dtsi b/arch/arm64/boot/dts/qcom/msm8937.dtsi
+index 72bbe64..609babf 100644
+--- a/arch/arm64/boot/dts/qcom/msm8937.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8937.dtsi
+@@ -752,6 +752,11 @@
+ 			reg = <0x00060000 0x8000>;
+ 		};
+ 
++		sram@290000 {
++			compatible = "qcom,rpm-stats";
++			reg = <0x00290000 0x10000>;
++		};
++
+ 		usb_hs_phy: phy@6c000 {
+ 			compatible = "qcom,usb-hs-28nm-femtophy";
+ 			reg = <0x0006c000 0x200>;
+-- 
+2.43.0
+
