@@ -1,0 +1,214 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] ASoC: codecs: msm8916-wcd-digital: only hold mclk while in use
+
+With the codec behind the ADSP, mclk is the ADSP's internal digital
+codec core clock. The driver enabled it at probe and kept it on for
+good, and while it is on the ADSP keeps its XO vote even when it is
+asleep, so the SoC never reaches XO shutdown or VDD-min.
+
+Take it for each register access and for the life of each stream, and
+drop it once the codec has been idle for 50 ms. Reads of cached
+registers do not touch the hardware, so idle time is clock-free.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/sound/soc/codecs/msm8916-wcd-digital.c
++++ b/sound/soc/codecs/msm8916-wcd-digital.c
+@@ -11,6 +11,8 @@
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/mfd/syscon.h>
++#include <linux/mutex.h>
++#include <linux/workqueue.h>
+ #include <sound/soc.h>
+ #include <sound/pcm.h>
+ #include <sound/pcm_params.h>
+@@ -224,8 +226,21 @@
+ 	struct soc_bytes_ext bytes_ext;
+ };
+ 
++/*
++ * mclk is the ADSP's internal digital codec core clock. While it is on the
++ * ADSP keeps XO running, even asleep, so the SoC never reaches XO shutdown.
++ * Hold it only for register writes and open streams, and let it go once the
++ * codec has been idle for MCLK_IDLE_MS.
++ */
++#define MCLK_IDLE_MS	50
++
+ struct msm8916_wcd_digital_priv {
+ 	struct clk *ahbclk, *mclk;
++	void __iomem *base;
++	struct mutex mclk_lock;	/* protects mclk_users and mclk_on */
++	unsigned int mclk_users;
++	bool mclk_on;
++	struct delayed_work mclk_off_work;
+ };
+ 
+ static const unsigned long rx_gain_reg[] = {
+@@ -1067,14 +1082,92 @@
+ 
+ };
+ 
++static int msm8916_wcd_digital_mclk_get(struct msm8916_wcd_digital_priv *priv)
++{
++	int ret = 0;
++
++	mutex_lock(&priv->mclk_lock);
++	if (!priv->mclk_on) {
++		ret = clk_prepare_enable(priv->mclk);
++		if (!ret)
++			priv->mclk_on = true;
++	}
++	if (!ret)
++		priv->mclk_users++;
++	mutex_unlock(&priv->mclk_lock);
++
++	return ret;
++}
++
++static void msm8916_wcd_digital_mclk_put(struct msm8916_wcd_digital_priv *priv)
++{
++	mutex_lock(&priv->mclk_lock);
++	if (!--priv->mclk_users)
++		mod_delayed_work(system_wq, &priv->mclk_off_work,
++				 msecs_to_jiffies(MCLK_IDLE_MS));
++	mutex_unlock(&priv->mclk_lock);
++}
++
++static void msm8916_wcd_digital_mclk_off(struct work_struct *work)
++{
++	struct msm8916_wcd_digital_priv *priv =
++		container_of(work, struct msm8916_wcd_digital_priv,
++			     mclk_off_work.work);
++
++	mutex_lock(&priv->mclk_lock);
++	if (!priv->mclk_users && priv->mclk_on) {
++		clk_disable_unprepare(priv->mclk);
++		priv->mclk_on = false;
++	}
++	mutex_unlock(&priv->mclk_lock);
++}
++
++static int msm8916_wcd_digital_reg_read(void *context, unsigned int reg,
++					unsigned int *val)
++{
++	struct msm8916_wcd_digital_priv *priv = context;
++	int ret;
++
++	ret = msm8916_wcd_digital_mclk_get(priv);
++	if (ret)
++		return ret;
++
++	*val = readl(priv->base + reg);
++	msm8916_wcd_digital_mclk_put(priv);
++
++	return 0;
++}
++
++static int msm8916_wcd_digital_reg_write(void *context, unsigned int reg,
++					 unsigned int val)
++{
++	struct msm8916_wcd_digital_priv *priv = context;
++	int ret;
++
++	ret = msm8916_wcd_digital_mclk_get(priv);
++	if (ret)
++		return ret;
++
++	writel(val, priv->base + reg);
++	msm8916_wcd_digital_mclk_put(priv);
++
++	return 0;
++}
++
+ static int msm8916_wcd_digital_startup(struct snd_pcm_substream *substream,
+ 				       struct snd_soc_dai *dai)
+ {
+ 	struct snd_soc_component *component = dai->component;
+ 	struct msm8916_wcd_digital_priv *msm8916_wcd;
+ 	unsigned long mclk_rate;
++	int ret;
+ 
+ 	msm8916_wcd = snd_soc_component_get_drvdata(component);
++	/* Held until shutdown, so the clock stays up while the stream runs */
++	ret = msm8916_wcd_digital_mclk_get(msm8916_wcd);
++	if (ret)
++		return ret;
++
+ 	snd_soc_component_update_bits(component, LPASS_CDC_CLK_MCLK_CTL,
+ 			    MCLK_CTL_MCLK_EN_MASK,
+ 			    MCLK_CTL_MCLK_EN_ENABLE);
+@@ -1106,6 +1199,7 @@
+ {
+ 	snd_soc_component_update_bits(dai->component, LPASS_CDC_CLK_PDM_CTL,
+ 			    LPASS_CDC_CLK_PDM_CTL_PDM_CLK_SEL_MASK, 0);
++	msm8916_wcd_digital_mclk_put(snd_soc_component_get_drvdata(dai->component));
+ }
+ 
+ static const struct snd_soc_dai_ops msm8916_wcd_digital_dai_ops = {
+@@ -1161,6 +1255,8 @@
+ 	.val_bits = 32,
+ 	.max_register = LPASS_CDC_TX2_DMIC_CTL,
+ 	.cache_type = REGCACHE_FLAT,
++	.reg_read = msm8916_wcd_digital_reg_read,
++	.reg_write = msm8916_wcd_digital_reg_write,
+ };
+ 
+ static int msm8916_wcd_digital_probe(struct platform_device *pdev)
+@@ -1179,9 +1275,12 @@
+ 	if (IS_ERR(base))
+ 		return PTR_ERR(base);
+ 
+-	digital_map =
+-	    devm_regmap_init_mmio(&pdev->dev, base,
+-				  &msm8916_codec_regmap_config);
++	priv->base = base;
++	mutex_init(&priv->mclk_lock);
++	INIT_DELAYED_WORK(&priv->mclk_off_work, msm8916_wcd_digital_mclk_off);
++
++	digital_map = devm_regmap_init(&pdev->dev, NULL, priv,
++				       &msm8916_codec_regmap_config);
+ 	if (IS_ERR(digital_map))
+ 		return PTR_ERR(digital_map);
+ 
+@@ -1195,25 +1294,20 @@
+ 		return ret;
+ 	}
+ 
+-	ret = clk_prepare_enable(priv->mclk);
+-	if (ret < 0) {
+-		dev_err(dev, "failed to enable mclk %d\n", ret);
+-		goto err_clk;
+-	}
+-
+ 	dev_set_drvdata(dev, priv);
+ 
+ 	ret = devm_snd_soc_register_component(dev, &msm8916_wcd_digital,
+ 				      msm8916_wcd_digital_dai,
+ 				      ARRAY_SIZE(msm8916_wcd_digital_dai));
+ 	if (ret)
+-		goto err_mclk;
++		goto err_clk;
+ 
+ 	return 0;
+ 
+-err_mclk:
+-	clk_disable_unprepare(priv->mclk);
+ err_clk:
++	cancel_delayed_work_sync(&priv->mclk_off_work);
++	if (priv->mclk_on)
++		clk_disable_unprepare(priv->mclk);
+ 	clk_disable_unprepare(priv->ahbclk);
+ 	return ret;
+ }
+@@ -1222,7 +1316,9 @@
+ {
+ 	struct msm8916_wcd_digital_priv *priv = dev_get_drvdata(&pdev->dev);
+ 
+-	clk_disable_unprepare(priv->mclk);
++	cancel_delayed_work_sync(&priv->mclk_off_work);
++	if (priv->mclk_on)
++		clk_disable_unprepare(priv->mclk);
+ 	clk_disable_unprepare(priv->ahbclk);
+ }
+ 

@@ -96,3 +96,6 @@ CONFIG_DEBUG_INFO_NONE=y
 # bootloader framebuffer.
 CONFIG_DRM_MSM_DSI_12NM_PHY=y
 CONFIG_DRM_PANEL_MOBVOI_ROVER=m
+
+# Audio: the speaker amp (see patch 0017).
+CONFIG_SND_SOC_AW882XX=m

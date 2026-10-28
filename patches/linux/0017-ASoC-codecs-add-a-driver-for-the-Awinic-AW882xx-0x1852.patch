@@ -1,0 +1,399 @@
+From e3b936e7b83287eec0faa2614ea118a527e4e265 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Tue, 13 Oct 2026 17:04:25 +0200
+Subject: [PATCH] ASoC: codecs: add a driver for the Awinic AW882xx (0x1852)
+
+The TicWatch Pro 3's speaker amp is an Awinic part with chip ID 0x1852,
+which none of the mainline Awinic drivers know. Android runs it from a
+register file (aw882xx_spk_reg.bin on the vendor partition) and then
+treats it as a plain I2S amplifier: power it up and wait for the PLL to
+lock once the I2S clocks run, then unmute; mute and power down when the
+stream stops. Do the same, waiting for the lock in a work item since the
+clocks may only start after the codec is unmuted.
+
+The firmware name can be overridden with the firmware-name property.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ sound/soc/codecs/Kconfig   |   9 +
+ sound/soc/codecs/Makefile  |   2 +
+ sound/soc/codecs/aw882xx.c | 327 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 338 insertions(+)
+ create mode 100644 sound/soc/codecs/aw882xx.c
+
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 269c31c..e71f2a1 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -658,6 +658,15 @@ config SND_SOC_AW8738
+ 	  SND_SOC_SIMPLE_AMPLIFIER, but additionally allows setting the
+ 	  operation mode using the Awinic-specific one-wire pulse control.
+ 
++config SND_SOC_AW882XX
++	tristate "Awinic AW882xx (0x1852) audio amplifier"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  Enable support for the Awinic AW882xx smart amplifier with chip ID
++	  0x1852, run as a plain I2S amplifier from the vendor's register
++	  file.
++
+ config SND_SOC_AW88395_LIB
+ 	select CRC8
+ 	tristate
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 172861d..65bfb2f 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -47,6 +47,7 @@ snd-soc-ak5558-y := ak5558.o
+ snd-soc-arizona-y := arizona.o arizona-jack.o
+ snd-soc-audio-iio-aux-y := audio-iio-aux.o
+ snd-soc-aw8738-y := aw8738.o
++snd-soc-aw882xx-y := aw882xx.o
+ snd-soc-aw87390-y := aw87390.o
+ snd-soc-aw88081-y := aw88081.o
+ snd-soc-aw88395-lib-y := aw88395/aw88395_lib.o \
+@@ -485,6 +486,7 @@ obj-$(CONFIG_SND_SOC_ALC5632)	+= snd-soc-alc5632.o
+ obj-$(CONFIG_SND_SOC_ARIZONA)	+= snd-soc-arizona.o
+ obj-$(CONFIG_SND_SOC_AUDIO_IIO_AUX)	+= snd-soc-audio-iio-aux.o
+ obj-$(CONFIG_SND_SOC_AW8738)	+= snd-soc-aw8738.o
++obj-$(CONFIG_SND_SOC_AW882XX)	+= snd-soc-aw882xx.o
+ obj-$(CONFIG_SND_SOC_AW87390)	+= snd-soc-aw87390.o
+ obj-$(CONFIG_SND_SOC_AW88081)	+= snd-soc-aw88081.o
+ obj-$(CONFIG_SND_SOC_AW88395_LIB) += snd-soc-aw88395-lib.o
+diff --git a/sound/soc/codecs/aw882xx.c b/sound/soc/codecs/aw882xx.c
+new file mode 100644
+index 0000000..49376d6
+--- /dev/null
++++ b/sound/soc/codecs/aw882xx.c
+@@ -0,0 +1,327 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Awinic AW882xx (chip ID 0x1852) smart amplifier, run as a plain I2S
++ * amplifier from the vendor's register file.
++ *
++ * The register file is the one Android loads: (register, value) pairs,
++ * both little-endian 16-bit. The amp needs the I2S clocks to lock its PLL,
++ * so it is powered up when the stream unmutes and down when it mutes.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/delay.h>
++#include <linux/devm-helpers.h>
++#include <linux/firmware.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/regmap.h>
++#include <linux/regulator/consumer.h>
++#include <linux/unaligned.h>
++#include <linux/workqueue.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
++#define AW882XX_ID		0x00
++#define AW882XX_SYSST		0x01
++#define AW882XX_SYSCTRL		0x04
++#define AW882XX_SYSCTRL2	0x05
++#define AW882XX_I2SCTRL		0x06
++#define AW882XX_VTMCTRL3	0x56
++#define AW882XX_EFRH		0x78
++#define AW882XX_EFRM1		0x7a
++#define AW882XX_MAX_REG		0x7f
++
++#define AW882XX_CHIP_ID		0x1852
++
++#define AW882XX_PWDN		BIT(0)
++#define AW882XX_HMUTE		BIT(4)
++#define AW882XX_I2SSR		GENMASK(3, 0)
++#define AW882XX_I2SFS		GENMASK(7, 6)
++
++/* Undervoltage, boost overcurrent, overcurrent and overtemperature must be
++ * clear; boost done, switching, clock and PLL locked must be set. */
++#define AW882XX_SYSST_MASK	0x4b1b
++#define AW882XX_SYSST_OK	0x0311
++
++/* The efuse trim of the current and voltage sense paths: 10-bit signed. */
++#define AW882XX_EF_GESLP	GENMASK(9, 0)
++
++struct aw882xx {
++	struct device *dev;
++	struct regmap *regmap;
++	struct gpio_desc *reset;
++	const char *fw_name;
++	u8 *cfg;
++	size_t cfg_len;
++	struct delayed_work start_work;
++};
++
++static const struct regmap_config aw882xx_regmap = {
++	.reg_bits = 8,
++	.val_bits = 16,
++	.max_register = AW882XX_MAX_REG,
++	.val_format_endian = REGMAP_ENDIAN_BIG,
++};
++
++static int aw882xx_load_cfg(struct aw882xx *aw)
++{
++	size_t i;
++	int ret;
++
++	for (i = 0; i + 4 <= aw->cfg_len; i += 4) {
++		ret = regmap_write(aw->regmap, get_unaligned_le16(aw->cfg + i),
++				   get_unaligned_le16(aw->cfg + i + 2));
++		if (ret)
++			return ret;
++	}
++
++	return 0;
++}
++
++static s16 aw882xx_trim(struct aw882xx *aw, unsigned int reg)
++{
++	unsigned int val = 0;
++
++	regmap_read(aw->regmap, reg, &val);
++
++	return sign_extend32(val & AW882XX_EF_GESLP, 9);
++}
++
++/* What the vendor driver does after loading the register file: scale the
++ * voltage sense to the current sense using their efuse trims. */
++static int aw882xx_set_vcalb(struct aw882xx *aw)
++{
++	int icalk = 1000 + aw882xx_trim(aw, AW882XX_EFRM1);
++	int vcalk = 1000 + aw882xx_trim(aw, AW882XX_EFRH);
++
++	return regmap_write(aw->regmap, AW882XX_VTMCTRL3, (1 << 13) * icalk / vcalk);
++}
++
++/*
++ * The PLL locks to the I2S bit clock, which may only start after the codec
++ * is unmuted, so power up and wait for the lock off the stream's path.
++ */
++static void aw882xx_start(struct work_struct *work)
++{
++	struct aw882xx *aw = container_of(work, struct aw882xx, start_work.work);
++	unsigned int sysst = 0;
++	int i;
++
++	regmap_update_bits(aw->regmap, AW882XX_SYSCTRL, AW882XX_PWDN, 0);
++
++	for (i = 0; i < 100; i++) {
++		regmap_read(aw->regmap, AW882XX_SYSST, &sysst);
++		if ((sysst & AW882XX_SYSST_MASK) == AW882XX_SYSST_OK) {
++			regmap_update_bits(aw->regmap, AW882XX_SYSCTRL2, AW882XX_HMUTE, 0);
++			dev_dbg(aw->dev, "started after %d ms\n", i * 5);
++			return;
++		}
++		usleep_range(5000, 6000);
++	}
++
++	dev_err(aw->dev, "did not start, sysst 0x%04x\n", sysst);
++	regmap_update_bits(aw->regmap, AW882XX_SYSCTRL, AW882XX_PWDN, AW882XX_PWDN);
++}
++
++static void aw882xx_stop(struct aw882xx *aw)
++{
++	regmap_update_bits(aw->regmap, AW882XX_SYSCTRL2, AW882XX_HMUTE, AW882XX_HMUTE);
++	regmap_update_bits(aw->regmap, AW882XX_SYSCTRL, AW882XX_PWDN, AW882XX_PWDN);
++}
++
++static int aw882xx_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
++{
++	if ((fmt & SND_SOC_DAIFMT_FORMAT_MASK) != SND_SOC_DAIFMT_I2S ||
++	    (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) != SND_SOC_DAIFMT_CBC_CFC)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int aw882xx_hw_params(struct snd_pcm_substream *substream,
++			     struct snd_pcm_hw_params *params,
++			     struct snd_soc_dai *dai)
++{
++	struct aw882xx *aw = snd_soc_component_get_drvdata(dai->component);
++	unsigned int sr, fs;
++
++	switch (params_rate(params)) {
++	case 8000:
++		sr = 0;
++		break;
++	case 16000:
++		sr = 3;
++		break;
++	case 32000:
++		sr = 6;
++		break;
++	case 44100:
++		sr = 7;
++		break;
++	case 48000:
++		sr = 8;
++		break;
++	case 96000:
++		sr = 9;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	switch (params_width(params)) {
++	case 16:
++		fs = 0;
++		break;
++	case 24:
++		fs = 2;
++		break;
++	case 32:
++		fs = 3;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	return regmap_update_bits(aw->regmap, AW882XX_I2SCTRL,
++				  AW882XX_I2SSR | AW882XX_I2SFS,
++				  FIELD_PREP(AW882XX_I2SSR, sr) |
++				  FIELD_PREP(AW882XX_I2SFS, fs));
++}
++
++static int aw882xx_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct aw882xx *aw = snd_soc_component_get_drvdata(dai->component);
++
++	if (mute) {
++		cancel_delayed_work_sync(&aw->start_work);
++		aw882xx_stop(aw);
++	} else {
++		schedule_delayed_work(&aw->start_work, 0);
++	}
++
++	return 0;
++}
++
++static const struct snd_soc_dai_ops aw882xx_dai_ops = {
++	.set_fmt = aw882xx_set_fmt,
++	.hw_params = aw882xx_hw_params,
++	.mute_stream = aw882xx_mute_stream,
++	.no_capture_mute = 1,
++};
++
++static struct snd_soc_dai_driver aw882xx_dai = {
++	.name = "aw882xx-aif",
++	.playback = {
++		.stream_name = "Speaker Playback",
++		.channels_min = 1,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |
++			 SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
++			 SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE |
++			   SNDRV_PCM_FMTBIT_S32_LE,
++	},
++	.ops = &aw882xx_dai_ops,
++};
++
++static const struct snd_soc_dapm_widget aw882xx_widgets[] = {
++	SND_SOC_DAPM_AIF_IN("AIF IN", "Speaker Playback", 0, SND_SOC_NOPM, 0, 0),
++	SND_SOC_DAPM_OUTPUT("SPK"),
++};
++
++static const struct snd_soc_dapm_route aw882xx_routes[] = {
++	{ "SPK", NULL, "AIF IN" },
++};
++
++static const struct snd_soc_component_driver aw882xx_component = {
++	.dapm_widgets = aw882xx_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(aw882xx_widgets),
++	.dapm_routes = aw882xx_routes,
++	.num_dapm_routes = ARRAY_SIZE(aw882xx_routes),
++	.endianness = 1,
++};
++
++static int aw882xx_probe(struct i2c_client *i2c)
++{
++	struct device *dev = &i2c->dev;
++	const struct firmware *fw;
++	struct aw882xx *aw;
++	unsigned int id;
++	int ret;
++
++	aw = devm_kzalloc(dev, sizeof(*aw), GFP_KERNEL);
++	if (!aw)
++		return -ENOMEM;
++
++	aw->dev = dev;
++	i2c_set_clientdata(i2c, aw);
++	ret = devm_delayed_work_autocancel(dev, &aw->start_work, aw882xx_start);
++	if (ret)
++		return ret;
++
++	aw->regmap = devm_regmap_init_i2c(i2c, &aw882xx_regmap);
++	if (IS_ERR(aw->regmap))
++		return PTR_ERR(aw->regmap);
++
++	ret = devm_regulator_get_enable(dev, "vdd");
++	if (ret)
++		return dev_err_probe(dev, ret, "no vdd\n");
++
++	aw->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(aw->reset))
++		return dev_err_probe(dev, PTR_ERR(aw->reset), "no reset gpio\n");
++
++	if (aw->reset) {
++		usleep_range(1000, 2000);
++		gpiod_set_value_cansleep(aw->reset, 0);
++		usleep_range(2000, 3000);
++	}
++
++	ret = regmap_read(aw->regmap, AW882XX_ID, &id);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot read the chip ID\n");
++	if (id != AW882XX_CHIP_ID)
++		return dev_err_probe(dev, -ENODEV, "unknown chip ID 0x%04x\n", id);
++
++	aw->fw_name = "aw882xx_spk_reg.bin";
++	device_property_read_string(dev, "firmware-name", &aw->fw_name);
++
++	ret = request_firmware(&fw, aw->fw_name, dev);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot load %s\n", aw->fw_name);
++
++	aw->cfg_len = fw->size;
++	aw->cfg = devm_kmemdup(dev, fw->data, fw->size, GFP_KERNEL);
++	release_firmware(fw);
++	if (!aw->cfg)
++		return -ENOMEM;
++
++	ret = aw882xx_load_cfg(aw);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot write the register file\n");
++
++	aw882xx_set_vcalb(aw);
++	aw882xx_stop(aw);
++
++	return devm_snd_soc_register_component(dev, &aw882xx_component,
++					       &aw882xx_dai, 1);
++}
++
++static const struct of_device_id aw882xx_of_match[] = {
++	{ .compatible = "awinic,aw882xx" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, aw882xx_of_match);
++
++static struct i2c_driver aw882xx_driver = {
++	.driver = {
++		.name = "aw882xx",
++		.of_match_table = aw882xx_of_match,
++	},
++	.probe = aw882xx_probe,
++};
++module_i2c_driver(aw882xx_driver);
++
++MODULE_DESCRIPTION("Awinic AW882xx (0x1852) amplifier");
++MODULE_LICENSE("GPL");
+-- 
+2.53.0
+

@@ -1,0 +1,222 @@
+From 4c40493175609ff7828edf3b475f6beeb0f1c68a Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Tue, 13 Oct 2026 17:04:39 +0200
+Subject: [PATCH] arm64: dts: qcom: rover: enable audio
+
+Bring up the ADSP and a QDSP6 sound card with stock's two audio paths:
+the digital mic on DMIC0 into the SoC's codec (Tertiary MI2S), and the
+speaker amp on Quaternary MI2S (SD0 out, on the sec_mi2s pins).
+
+The amp is an Awinic AW882xx at 0x34 on blsp1_i2c2, powered from PM660
+L11 at 1.8 V like on stock.
+
+The ADSP image is relocatable but spans 21 MiB with its uninitialised
+segments, more than msm8937's 17 MiB region, so give it 24 MiB.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../boot/dts/qcom/sdm429w-mobvoi-rover.dts    | 152 +++++++++++++++++-
+ 1 file changed, 150 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+index 2cdcabe..d3e0b0d 100644
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -127,6 +127,34 @@
+ 	};
+ };
+ 
++&adsp {
++	status = "okay";
++};
++
++/* The ADSP image spans 21 MiB once its uninitialised segments count. */
++&adsp_mem {
++	size = <0x0 0x1800000>;
++	status = "okay";
++};
++
++&apr {
++	status = "okay";
++};
++
++&blsp1_i2c2 {
++	status = "okay";
++
++	speaker_amp: audio-codec@34 {
++		compatible = "awinic,aw882xx";
++		reg = <0x34>;
++		reset-gpios = <&tlmm 92 GPIO_ACTIVE_LOW>;
++		vdd-supply = <&pm660_l11>;
++		pinctrl-0 = <&speaker_amp_default>;
++		pinctrl-names = "default";
++		#sound-dai-cells = <0>;
++	};
++};
++
+ &blsp1_i2c4 {
+ 	status = "okay";
+ 
+@@ -234,6 +262,10 @@
+ 	};
+ };
+ 
++&lpass_codec {
++	status = "okay";
++};
++
+ &mdss {
+ 	status = "okay";
+ };
+@@ -307,6 +339,13 @@
+ 	status = "okay";
+ };
+ 
++&q6afedai {
++	dai@22 {
++		reg = <QUATERNARY_MI2S_RX>;
++		qcom,sd-lines = <0>;
++	};
++};
++
+ &rpm_requests {
+ 	regulators-0 {
+ 		compatible = "qcom,rpm-pm660-regulators";
+@@ -402,9 +441,10 @@
+ 			regulator-allow-set-load;
+ 		};
+ 
++		/* Stock's supply for the speaker amp, at 1.8 V. */
+ 		pm660_l11: l11 {
+-			regulator-min-microvolt = <1200000>;
+-			regulator-max-microvolt = <2040000>;
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
+ 			regulator-enable-ramp-delay = <250>;
+ 			regulator-ramp-delay = <0>;
+ 		};
+@@ -502,6 +542,70 @@
+ 	clock-frequency = <32768>;
+ };
+ 
++&sound {
++	model = "mobvoi-rover";
++	pinctrl-0 = <&cdc_dmic_default>, <&quat_mi2s_default>;
++	pinctrl-1 = <&cdc_dmic_sleep>, <&quat_mi2s_sleep>;
++	pinctrl-names = "default", "sleep";
++
++	audio-routing =
++		"DMIC1", "Digital Mic1",
++		"MM_DL1", "MultiMedia1 Playback",
++		"MultiMedia2 Capture", "MM_UL2";
++
++	status = "okay";
++
++	mm1-dai-link {
++		link-name = "MultiMedia1";
++
++		cpu {
++			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
++		};
++	};
++
++	mm2-dai-link {
++		link-name = "MultiMedia2";
++
++		cpu {
++			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
++		};
++	};
++
++	/* The digital mic, through the SoC's codec. */
++	tertiary-mi2s-dai-link {
++		link-name = "Tertiary MI2S";
++
++		cpu {
++			sound-dai = <&q6afedai TERTIARY_MI2S_TX>;
++		};
++
++		platform {
++			sound-dai = <&q6routing>;
++		};
++
++		codec {
++			sound-dai = <&lpass_codec 1>;
++		};
++	};
++
++	/* The speaker amp, on SD0. */
++	quaternary-mi2s-dai-link {
++		link-name = "Quaternary MI2S";
++
++		cpu {
++			sound-dai = <&q6afedai QUATERNARY_MI2S_RX>;
++		};
++
++		platform {
++			sound-dai = <&q6routing>;
++		};
++
++		codec {
++			sound-dai = <&speaker_amp>;
++		};
++	};
++};
++
+ &spmi_bus {
+ 	pmic@0 {
+ 		pm660_fg: fuel-gauge@4000 {
+@@ -541,6 +645,50 @@
+ 		bias-disable;
+ 	};
+ 
++	cdc_dmic_default: cdc-dmic-default-state {
++		clk-pins {
++			pins = "gpio89";
++			function = "dmic0_clk";
++			drive-strength = <8>;
++			bias-disable;
++		};
++
++		data-pins {
++			pins = "gpio90";
++			function = "dmic0_data";
++			drive-strength = <8>;
++			bias-disable;
++		};
++	};
++
++	cdc_dmic_sleep: cdc-dmic-sleep-state {
++		pins = "gpio89", "gpio90";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
++	speaker_amp_default: speaker-amp-default-state {
++		pins = "gpio92";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	quat_mi2s_default: quat-mi2s-default-state {
++		pins = "gpio12", "gpio13", "gpio94", "gpio95";
++		function = "sec_mi2s";
++		drive-strength = <8>;
++		bias-disable;
++	};
++
++	quat_mi2s_sleep: quat-mi2s-sleep-state {
++		pins = "gpio12", "gpio13", "gpio94", "gpio95";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
+ 	wifi_reg_on: wifi-reg-on-state {
+ 		pins = "gpio72";
+ 		function = "gpio";
+-- 
+2.53.0
+

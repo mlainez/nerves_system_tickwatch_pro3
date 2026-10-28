@@ -155,6 +155,45 @@ for n in $GPU_FW; do
 	fi
 done
 
+# The speaker amp's register file. Its driver asks for it by this name.
+if amp=$(find_file "aw882xx_spk_reg.bin"); then
+	log "speaker amp config: $amp"
+	ln -sf "$amp" "$FWDIR/aw882xx_spk_reg.bin"
+	found_any=1
+else
+	log "no aw882xx_spk_reg.bin found; no speaker"
+fi
+
+# The ADSP runs the audio (QDSP6). Its signed image, adsp.mdt and its
+# adsp.bNN segments, is on the stock `modem` partition (FAT, NON-HLOS),
+# which nothing else mounts. qcom_q6v5_pas asks for adsp.mdt once
+# nerves_uevent loads it, after this script.
+#
+# /root/.no-adsp leaves the ADSP unbooted, for measuring power without it:
+# once booted it stays awake and holds XO on.
+MODEM_DIR=/mnt/modem
+for b in /sys/class/block/*; do
+	if [ -e /root/.no-adsp ]; then
+		log "/root/.no-adsp present; not staging the ADSP, no audio"
+		break
+	fi
+	grep -qx "PARTNAME=modem" "$b/uevent" 2>/dev/null || continue
+	if mount -t vfat -o ro,nodev,noexec,nosuid "/dev/${b##*/}" "$MODEM_DIR"; then
+		for fw in "$MODEM_DIR"/image/adsp.*; do
+			[ -f "$fw" ] && ln -sf "$fw" "$FWDIR/${fw##*/}"
+		done
+		if [ -f "$FWDIR/adsp.mdt" ]; then
+			log "ADSP firmware: $MODEM_DIR/image/adsp.mdt"
+			found_any=1
+		else
+			log "no adsp.mdt on the modem partition; no audio"
+		fi
+	else
+		log "could not mount the modem partition; no audio"
+	fi
+	break
+done
+
 if [ "$found_any" = "1" ]; then
 	if [ -w "$PARAM" ]; then
 		printf "%s" "$FWDIR" > "$PARAM"
