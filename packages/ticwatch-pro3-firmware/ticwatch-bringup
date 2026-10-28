@@ -194,6 +194,23 @@ for b in /sys/class/block/*; do
 	break
 done
 
+# Firmware the watch doesn't carry at all goes in /root/firmware on the
+# application partition, under the names its driver asks for. So far that is
+# Venus, the video codec: stock leaves video out and ships none, but the
+# watch's TrustZone runs another msm8937 phone's (venus.mdt and venus.b00 to
+# venus.b04, e.g. the Moto G5S's VIDEO.VE_ULT.3.1). It must be in place
+# before qcom-venus probes, which only tries once.
+if [ -d /root/firmware ]; then
+	set -- /root/firmware/*
+	for fw in "$@"; do
+		[ -f "$fw" ] && ln -sf "$fw" "$FWDIR/${fw##*/}"
+	done
+	if [ -f "$1" ]; then
+		log "staged $# file(s) from /root/firmware"
+		found_any=1
+	fi
+fi
+
 if [ "$found_any" = "1" ]; then
 	if [ -w "$PARAM" ]; then
 		printf "%s" "$FWDIR" > "$PARAM"

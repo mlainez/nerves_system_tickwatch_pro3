@@ -1,0 +1,51 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] media: venus: power the core down when probe fails
+
+Probe powers the core up with pm_runtime_get_sync() before loading the
+firmware. When that or anything after it failed, the error path dropped
+the usage count with pm_runtime_put_noidle() and marked the device
+suspended, so the runtime suspend callback never ran and the core,
+bus and vcodec clocks stayed on. On the watch those are XO-fed GCC
+branches, and with no firmware found at boot they kept the SoC out of
+XO shutdown for good.
+
+Suspend the core on the way out when the get had succeeded.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/drivers/media/platform/qcom/venus/core.c
++++ b/drivers/media/platform/qcom/venus/core.c
+@@ -451,11 +451,11 @@ static int venus_probe(struct platform_device *pdev)
+ 
+ 	ret = pm_runtime_get_sync(dev);
+ 	if (ret < 0)
+-		goto err_runtime_disable;
++		goto err_runtime_put;
+ 
+ 	ret = venus_firmware_init(core);
+ 	if (ret)
+-		goto err_runtime_disable;
++		goto err_runtime_suspend;
+ 
+ 	ret = venus_boot(core);
+ 	if (ret)
+@@ -515,8 +515,16 @@ static int venus_probe(struct platform_device *pdev)
+ 	venus_shutdown(core);
+ err_firmware_deinit:
+ 	venus_firmware_deinit(core);
+-err_runtime_disable:
++err_runtime_suspend:
++	/*
++	 * The get above powered the core up. Marking it suspended alone would
++	 * leave its clocks on, and the SoC never reaching XO shutdown.
++	 */
++	pm_runtime_put_sync_suspend(dev);
++	goto err_runtime_disable;
++err_runtime_put:
+ 	pm_runtime_put_noidle(dev);
++err_runtime_disable:
+ 	pm_runtime_disable(dev);
+ 	pm_runtime_set_suspended(dev);
+ 	v4l2_device_unregister(&core->v4l2_dev);
+-- 
+2.43.0

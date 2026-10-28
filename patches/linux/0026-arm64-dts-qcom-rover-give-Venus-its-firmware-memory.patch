@@ -1,0 +1,36 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] arm64: dts: qcom: rover: give Venus its firmware memory
+
+msm8937.dtsi leaves venus_mem disabled, so the region was never
+reserved and Venus failed its probe at the memory-region lookup, before
+it looked for firmware. Enable it, at 6 MiB: the driver's limit, and
+room for the msm8937 family's images.
+
+The watch ships no Venus firmware (stock Wear OS leaves video out), but
+its TrustZone takes another msm8937 phone's; ticwatch-bringup says
+where it goes.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -710,6 +710,17 @@ &usb_hs_phy {
+ 	status = "okay";
+ };
+ 
++/*
++ * Venus, the video codec. The watch ships no firmware for it (stock leaves
++ * video out), so it runs one from the same family. msm8937.dtsi leaves its
++ * carve-out disabled; the images that fit take up to 5 MiB, so give it the
++ * 6 MiB the driver allows.
++ */
++&venus_mem {
++	size = <0x0 0x600000>;
++	status = "okay";
++};
++
+ &xo_board {
+ 	clock-frequency = <19200000>;
+ };
+-- 
+2.43.0
