@@ -5,14 +5,13 @@ set -u
 
 RUN=/run/android-gps
 SYSTEM_MOUNT=/mnt/android-system
-DATA_ROOT=/root/android-gps-data
 ANDROID_LINKER=
 
 log() { echo "gpsctl: $*" >&2; }
 mounted() { grep -q " $1 " /proc/mounts; }
 
 prepare_mounts() {
-	mkdir -p "$RUN" "$SYSTEM_MOUNT" /system /vendor /data /dev/socket
+	mkdir -p "$RUN" "$SYSTEM_MOUNT" /system /vendor /dev/socket
 
 	if ! mounted "$SYSTEM_MOUNT"; then
 		[ -e /dev/nerves-system ] || {
@@ -62,13 +61,9 @@ prepare_mounts() {
 		mount -o remount,bind,ro,exec,nodev,nosuid /vendor || return 1
 	fi
 
-	# Give the Android processes durable writable state on Nerves' application
-	# partition. /data itself is only an empty directory in the squashfs.
-	mkdir -p "$DATA_ROOT/vendor/gps" "$DATA_ROOT/misc/gps" "$DATA_ROOT/system/gps"
-	if ! mounted /data; then
-		mount -o bind "$DATA_ROOT" /data || return 1
-		mount -o remount,bind,rw,nodev,nosuid /data || return 1
-	fi
+	# /data is Nerves' symlink to the writable application partition, so the
+	# Android processes' state persists without any mount.
+	mkdir -p /data/vendor/gps /data/misc/gps /data/system/gps || return 1
 }
 
 find_binary() {

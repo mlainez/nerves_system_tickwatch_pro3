@@ -22,7 +22,7 @@ define ANDROID_GPS_COMPAT_INSTALL_TARGET_CMDS
 	mkdir -p $(TARGET_DIR)/usr/libexec
 	gzip -n -c $(@D)/gps-hal-bridge32 > $(TARGET_DIR)/usr/libexec/gps-hal-bridge32.gz
 	mkdir -p $(TARGET_DIR)/mnt/android-system $(TARGET_DIR)/system \
-		$(TARGET_DIR)/vendor $(TARGET_DIR)/data $(TARGET_DIR)/dev/socket
+		$(TARGET_DIR)/vendor $(TARGET_DIR)/dev/socket
 endef
 
 $(eval $(generic-package))
