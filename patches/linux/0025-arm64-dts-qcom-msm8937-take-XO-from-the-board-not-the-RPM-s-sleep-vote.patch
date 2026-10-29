@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Mon, 19 Oct 2026 16:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: msm8937: take XO from the board, not the
+ RPM's sleep vote
+
+The GCC, the SDHCI hosts, the digital codec and the APCS muxes took
+RPM_SMD_XO_CLK_SRC as their XO: the RPM XO vote that holds in both the
+active and the sleep set. Any of them prepared, and the GCC's clocks all
+descend from it, kept the APSS voting for XO while asleep. The RPM
+master stats showed the APSS power collapsing over 100,000 times, s2idle
+included, without once releasing XO, and vlow and vmin stayed at zero.
+
+Feed them from the board XO instead, as on MSM8916. The always-on
+RPM_SMD_XO_A_CLK_SRC keeps XO up while the APSS runs, and the GCC
+requests XO from the RPM in hardware while a branch needs it.
+
+The DSI and USB PHYs keep the RPM vote. Their PLLs run from XO outside
+the GCC, so nothing else holds XO for them while the APSS sleeps: with
+the board XO the panel's command-mode kickoffs timed out. They are only
+prepared while the display or USB is in use.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/arch/arm64/boot/dts/qcom/msm8937.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8937.dtsi
+@@ -1197,7 +1197,16 @@
+ 			#clock-cells = <1>;
+ 			#reset-cells = <1>;
+ 			#power-domain-cells = <1>;
+-			clocks = <&rpmcc RPM_SMD_XO_CLK_SRC>,
++			/*
++			 * The GCC asks the RPM for XO in hardware while a branch
++			 * needs it. Through rpmcc every prepared peripheral clock
++			 * would also vote XO in the APSS's sleep set, and the RPM
++			 * could never shut XO down. As on MSM8916, the GCC and the
++			 * blocks it clocks take the board XO. The DSI and USB PHYs
++			 * keep the RPM vote: their PLLs run from XO outside the GCC
++			 * and need it held while the APSS sleeps.
++			 */
++			clocks = <&xo_board>,
+ 				 <&sleep_clk>,
+ 				 <&mdss_dsi0_phy DSI_PIXEL_PLL_CLK>,
+ 				 <&mdss_dsi0_phy DSI_BYTE_PLL_CLK>,
+@@ -1834,7 +1843,7 @@
+ 			clocks = <&gcc GCC_MSS_CFG_AHB_CLK>,
+ 				 <&gcc GCC_MSS_Q6_BIMC_AXI_CLK>,
+ 				 <&gcc GCC_BOOT_ROM_AHB_CLK>,
+-				 <&rpmcc RPM_SMD_XO_CLK_SRC>;
++				 <&xo_board>;
+ 			clock-names = "iface", "bus", "mem", "xo";
+ 
+ 			qcom,smem-states = <&modem_smp2p_out 0>;
+@@ -1895,7 +1904,7 @@
+ 					  "pwr_irq";
+ 			clocks = <&gcc GCC_SDCC1_AHB_CLK>,
+ 				 <&gcc GCC_SDCC1_APPS_CLK>,
+-				 <&rpmcc RPM_SMD_XO_CLK_SRC>;
++				 <&xo_board>;
+ 			clock-names = "iface",
+ 				      "core",
+ 				      "xo";
+@@ -1925,7 +1934,7 @@
+ 					  "pwr_irq";
+ 			clocks = <&gcc GCC_SDCC2_AHB_CLK>,
+ 				 <&gcc GCC_SDCC2_APPS_CLK>,
+-				 <&rpmcc RPM_SMD_XO_CLK_SRC>;
++				 <&xo_board>;
+ 			clock-names = "iface",
+ 				      "core",
+ 				      "xo";
+@@ -2221,7 +2230,7 @@
+ 			compatible = "qcom,msm8939-apcs-kpss-global", "syscon";
+ 			reg = <0x0b011000 0x1000>;
+ 			#mbox-cells = <1>;
+-			clocks = <&a53pll_c1>, <&gcc GPLL0_EARLY>, <&rpmcc RPM_SMD_XO_CLK_SRC>;
++			clocks = <&a53pll_c1>, <&gcc GPLL0_EARLY>, <&xo_board>;
+ 			clock-names = "pll", "aux", "ref";
+ 			#clock-cells = <0>;
+ 			assigned-clocks = <&apcs2>;
+@@ -2275,7 +2284,7 @@
+ 			compatible = "qcom,msm8939-apcs-kpss-global", "syscon";
+ 			reg = <0x0b111000 0x1000>;
+ 			#mbox-cells = <1>;
+-			clocks = <&a53pll_c0>, <&gcc GPLL0_EARLY>, <&rpmcc RPM_SMD_XO_CLK_SRC>;
++			clocks = <&a53pll_c0>, <&gcc GPLL0_EARLY>, <&xo_board>;
+ 			clock-names = "pll", "aux", "ref";
+ 			#clock-cells = <0>;
+ 		};
+@@ -2374,7 +2383,7 @@
+ 			#mbox-cells = <1>;
+ 			clocks = <&gcc GPLL0_EARLY>,
+ 				 <&gcc GPLL0_EARLY>,
+-				 <&rpmcc RPM_SMD_XO_CLK_SRC>;
++				 <&xo_board>;
+ 			clock-names = "pll", "aux", "ref";
+ 			#clock-cells = <0>;
+ 		};
+@@ -2399,7 +2408,7 @@
+ 
+ 			clocks = <&q6afecc LPASS_CLK_ID_INTERNAL_DIGITAL_CODEC_CORE
+ 					   LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+-				 <&rpmcc RPM_SMD_XO_CLK_SRC>;
++				 <&xo_board>;
+ 			clock-names = "mclk", "ahbix-clk";
+ 			assigned-clocks = <&q6afecc LPASS_CLK_ID_INTERNAL_DIGITAL_CODEC_CORE
+ 						    LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+-- 
+2.43.0

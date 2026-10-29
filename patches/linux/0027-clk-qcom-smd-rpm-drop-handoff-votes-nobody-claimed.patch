@@ -1,0 +1,63 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] clk: qcom: smd-rpm: drop handoff votes nobody claimed
+
+At probe every RPM clock is voted on at full rate, in the sleep set as
+well as the active one, and only a prepare/unprepare cycle replaces that
+vote. A clock without a consumer never gets one, and clk_disable_unused
+skips it since the ops have no is_prepared. On MSM8937 that leaves
+bb_clk2, rf_clk2, div_clk2, qdss and the pin-controlled buffers on in
+the sleep set, so the RPM never shuts XO down.
+
+Once every consumer has probed, vote off each pair of which neither
+half is prepared.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/drivers/clk/qcom/clk-smd-rpm.c
++++ b/drivers/clk/qcom/clk-smd-rpm.c
+@@ -1337,6 +1337,37 @@
+ 	platform_device_unregister(icc_pdev);
+ }
+ 
++/*
++ * The handoff in probe votes every clock on, in the sleep set as well, and
++ * only a prepare/unprepare cycle ever replaces that vote. A clock nothing
++ * consumes keeps it for good, and an XO buffer held on in the sleep set
++ * keeps the RPM from ever shutting XO down. Once all consumers have probed,
++ * drop the vote of each pair neither half of which is prepared.
++ */
++static void rpm_smd_clk_sync_state(struct device *dev)
++{
++	const struct rpm_smd_clk_desc *desc = of_device_get_match_data(dev);
++	size_t i;
++
++	guard(mutex)(&rpm_smd_clk_lock);
++
++	for (i = 0; i < desc->num_clks; i++) {
++		struct clk_smd_rpm *r = desc->clks[i];
++
++		/* The active-only half shares the resource; one vote covers both */
++		if (!r || r->active_only || r->enabled || r->peer->enabled)
++			continue;
++
++		if (clk_smd_rpm_set_rate_active(r, 0) ||
++		    clk_smd_rpm_set_rate_sleep(r, 0))
++			dev_warn(dev, "failed to drop handoff vote for %s\n",
++				 clk_hw_get_name(&r->hw));
++		else
++			dev_info(dev, "dropped handoff vote for %s\n",
++				 clk_hw_get_name(&r->hw));
++	}
++}
++
+ static int rpm_smd_clk_probe(struct platform_device *pdev)
+ {
+ 	int ret;
+@@ -1425,6 +1456,7 @@
+ 	.driver = {
+ 		.name = "qcom-clk-smd-rpm",
+ 		.of_match_table = rpm_smd_clk_match_table,
++		.sync_state = rpm_smd_clk_sync_state,
+ 	},
+ 	.probe = rpm_smd_clk_probe,
+ };

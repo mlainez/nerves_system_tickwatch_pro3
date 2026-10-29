@@ -1,0 +1,37 @@
+From b71a6a269a6eb0c5ed8e1d07153f311110ed9922 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Thu, 15 Oct 2026 09:58:47 +0000
+Subject: [PATCH] cpuidle: psci: create the cpuidle device after deferred
+ probing
+
+With OSI, the CPU PM domains are created by a platform driver that
+defers until every parent domain's provider has probed. When the
+outermost one is the Qualcomm MPM, which waits on its mailbox and the
+RPM, the domains only appear after device_initcall. The psci-cpuidle
+faux device can't defer, so it failed to attach CPU 0 and the CPUs were
+left without cpuidle at all.
+
+Create it at late_initcall_sync, once deferred probing is done.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+ drivers/cpuidle/cpuidle-psci.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index dcf20ea..0d52e80 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -489,4 +489,8 @@ static int __init psci_idle_init(void)
+ 
+ 	return 0;
+ }
+-device_initcall(psci_idle_init);
++/*
++ * The CPU PM domains can hang off a provider probed late, such as the
++ * Qualcomm MPM, and the faux device can't defer: wait for deferred probes.
++ */
++late_initcall_sync(psci_idle_init);
+-- 
+2.43.0
+

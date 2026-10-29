@@ -1,0 +1,41 @@
+From eb7eba14f104ee2a0f1c3e9c0c411d082aa42886 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Thu, 15 Oct 2026 09:39:06 +0000
+Subject: [PATCH] spi: qup: don't leak a clock enable on resume while runtime
+ suspended
+
+spi_qup_suspend() runtime resumes a runtime suspended controller so it
+can reset it, then disables the clocks. spi_qup_resume() always enables
+them again, but the device is still runtime suspended, so nothing
+disables them: each system suspend taken while the bus is idle leaves
+the core and iface clocks enabled once more.
+
+Put a controller that was runtime suspended back into that state at the
+end of resume.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+ drivers/spi/spi-qup.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/spi/spi-qup.c b/drivers/spi/spi-qup.c
+index 0ca97ae..087b03f 100644
+--- a/drivers/spi/spi-qup.c
++++ b/drivers/spi/spi-qup.c
+@@ -1309,6 +1309,13 @@ static int spi_qup_resume(struct device *device)
+ 	if (ret)
+ 		goto disable_clk;
+ 
++	/*
++	 * A controller that was runtime suspended stays so: its runtime resume
++	 * will enable the clocks again.
++	 */
++	if (pm_runtime_suspended(device))
++		return spi_qup_pm_suspend_runtime(device);
++
+ 	return 0;
+ 
+ disable_clk:
+-- 
+2.43.0
+
