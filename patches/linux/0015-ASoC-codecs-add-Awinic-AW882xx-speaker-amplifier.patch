@@ -9,9 +9,14 @@ handle. Add a driver that runs it as a plain I2S amplifier: the
 speaker protection algorithm Android ran on the ADSP is not used.
 
 The stock firmware's aw882xx_spk_reg.bin register file is applied
-before the first stream when present. The PLL locks on the I2S bit
-clock, so power-up waits for it in mute_stream, which runs after the
-CPU DAI has started the port.
+before the first stream when present, followed by the voltage sense
+calibration the vendor driver applies from the chip's efuse trims
+(VTMCTRL3 from the EFRH and EFRM1 sense gain trims).
+
+The PLL locks on the I2S bit clock. Through the ADSP that clock only
+runs once the stream has started, after the codec has been unmuted, so
+power-up and the wait for the lock run from a work item that unmute
+schedules; mute cancels it and powers the amplifier down.
 ---
 --- a/sound/soc/codecs/Kconfig
 +++ b/sound/soc/codecs/Kconfig
@@ -59,7 +64,7 @@ CPU DAI has started the port.
  obj-$(CONFIG_SND_SOC_AW88166)	+=snd-soc-aw88166.o
 --- /dev/null
 +++ b/sound/soc/codecs/aw882xx.c
-@@ -0,0 +1,484 @@
+@@ -0,0 +1,552 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +//
 +// aw882xx.c -- Awinic AW882xx (chip id 0x1852) smart amplifier
@@ -67,11 +72,13 @@ CPU DAI has started the port.
 +// The amplifier is used as a plain I2S speaker amplifier: the speaker
 +// protection algorithm the Android driver ran on the ADSP is not used.
 +// A board register file, as shipped with the stock firmware, is applied
-+// before the first power-up when present.
++// before the first power-up when present, followed by the voltage sense
++// calibration the vendor driver applies from the chip's efuse trims.
 +//
 +
 +#include <linux/bitfield.h>
 +#include <linux/delay.h>
++#include <linux/devm-helpers.h>
 +#include <linux/firmware.h>
 +#include <linux/gpio/consumer.h>
 +#include <linux/i2c.h>
@@ -79,6 +86,7 @@ CPU DAI has started the port.
 +#include <linux/regmap.h>
 +#include <linux/regulator/consumer.h>
 +#include <linux/unaligned.h>
++#include <linux/workqueue.h>
 +#include <sound/pcm_params.h>
 +#include <sound/soc.h>
 +#include <sound/tlv.h>
@@ -90,13 +98,20 @@ CPU DAI has started the port.
 +#define AW882XX_SYSCTRL2	0x05
 +#define AW882XX_I2SCTRL		0x06
 +#define AW882XX_HAGCCFG4	0x0c
++#define AW882XX_VTMCTRL3	0x56
 +#define AW882XX_PLLCTRL1	0x66
++#define AW882XX_EFRH		0x78
++#define AW882XX_EFRM1		0x7a
 +#define AW882XX_REG_MAX		0x7c
 +
 +#define AW882XX_CHIP_ID		0x1852
 +
-+#define AW882XX_SYSST_CLKS	BIT(4)
-+#define AW882XX_SYSST_PLLS	BIT(0)
++/*
++ * Undervoltage, boost overcurrent, overcurrent and overtemperature must be
++ * clear; boost done, switching, clock and PLL locked must be set.
++ */
++#define AW882XX_SYSST_MASK	0x4b1b
++#define AW882XX_SYSST_OK	0x0311
 +
 +#define AW882XX_SYSCTRL_AMPPD	BIT(1)
 +#define AW882XX_SYSCTRL_PWDN	BIT(0)
@@ -116,6 +131,9 @@ CPU DAI has started the port.
 +
 +#define AW882XX_HAGCCFG4_VOL	GENMASK(15, 8)
 +
++/* The efuse trims of the current and voltage sense paths: 10-bit signed. */
++#define AW882XX_EF_GESLP	GENMASK(9, 0)
++
 +/* Attenuation in 0.5 dB steps, from 0 dB down to -90 dB. */
 +#define AW882XX_VOL_STEPS	180
 +
@@ -127,6 +145,7 @@ CPU DAI has started the port.
 +	struct device *dev;
 +	unsigned int volume;
 +	bool fw_tried;
++	struct work_struct start_work;
 +};
 +
 +static const struct regmap_config aw882xx_regmap_config = {
@@ -156,17 +175,37 @@ CPU DAI has started the port.
 +					     aw882xx_vol_to_reg(aw->volume)));
 +}
 +
++static s16 aw882xx_trim(struct aw882xx *aw, unsigned int reg)
++{
++	unsigned int val = 0;
++
++	regmap_read(aw->regmap, reg, &val);
++
++	return sign_extend32(val & AW882XX_EF_GESLP, 9);
++}
++
++/*
++ * What the vendor driver does after loading the register file: scale the
++ * voltage sense to the current sense using their efuse trims.
++ */
++static int aw882xx_set_vcalb(struct aw882xx *aw)
++{
++	int icalk = 1000 + aw882xx_trim(aw, AW882XX_EFRM1);
++	int vcalk = 1000 + aw882xx_trim(aw, AW882XX_EFRH);
++
++	return regmap_write(aw->regmap, AW882XX_VTMCTRL3,
++			    (1 << 13) * icalk / vcalk);
++}
++
 +/*
 + * The register file is a list of little-endian (u16 address, u16 value)
 + * records, written in order.
 + */
-+static void aw882xx_load_board_config(struct aw882xx *aw)
++static void aw882xx_apply_board_config(struct aw882xx *aw)
 +{
 +	const struct firmware *fw;
 +	size_t i;
 +	int ret;
-+
-+	aw->fw_tried = true;
 +
 +	ret = firmware_request_nowarn(&fw, AW882XX_FW_NAME, aw->dev);
 +	if (ret) {
@@ -201,11 +240,10 @@ CPU DAI has started the port.
 +	int ret;
 +
 +	ret = regmap_read_poll_timeout(aw->regmap, AW882XX_SYSST, val,
-+				       (val & (AW882XX_SYSST_CLKS | AW882XX_SYSST_PLLS)) ==
-+				       (AW882XX_SYSST_CLKS | AW882XX_SYSST_PLLS),
-+				       2000, 40000);
++				       (val & AW882XX_SYSST_MASK) == AW882XX_SYSST_OK,
++				       5000, 500000);
 +	if (ret)
-+		dev_err(aw->dev, "PLL did not lock, SYSST=0x%04x\n", val);
++		dev_err(aw->dev, "did not start, SYSST=0x%04x\n", val);
 +
 +	return ret;
 +}
@@ -214,6 +252,22 @@ CPU DAI has started the port.
 +{
 +	regmap_set_bits(aw->regmap, AW882XX_SYSCTRL2, AW882XX_SYSCTRL2_HMUTE);
 +	regmap_set_bits(aw->regmap, AW882XX_SYSCTRL, AW882XX_SYSCTRL_PWDN);
++}
++
++static void aw882xx_load_board_config(struct aw882xx *aw)
++{
++	int ret;
++
++	aw->fw_tried = true;
++
++	aw882xx_apply_board_config(aw);
++
++	ret = aw882xx_set_vcalb(aw);
++	if (ret)
++		dev_err(aw->dev, "voltage sense calibration failed: %d\n", ret);
++
++	/* Leave the amp muted and down whatever the register file set. */
++	aw882xx_power_down(aw);
 +}
 +
 +static int aw882xx_power_up(struct aw882xx *aw)
@@ -329,20 +383,35 @@ CPU DAI has started the port.
 +				  FIELD_PREP(AW882XX_I2SCTRL_I2SSR, sr));
 +}
 +
++static void aw882xx_start(struct work_struct *work)
++{
++	struct aw882xx *aw = container_of(work, struct aw882xx, start_work);
++	int ret;
++
++	ret = aw882xx_power_up(aw);
++	if (ret)
++		dev_err(aw->dev, "failed to start: %d\n", ret);
++}
++
 +/*
-+ * The PLL locks on the I2S bit clock, which the CPU DAI starts in its
-+ * prepare callback, ahead of the codec being unmuted.
++ * The PLL locks on the I2S bit clock. Through the ADSP, that clock only
++ * runs once the stream has started, which is after the codec is unmuted,
++ * so waiting for the lock here would always time out. Power up and wait
++ * for the lock from a work item instead.
 + */
 +static int aw882xx_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
 +{
 +	struct aw882xx *aw = snd_soc_component_get_drvdata(dai->component);
 +
 +	if (mute) {
++		cancel_work_sync(&aw->start_work);
 +		aw882xx_power_down(aw);
 +		return 0;
 +	}
 +
-+	return aw882xx_power_up(aw);
++	schedule_work(&aw->start_work);
++
++	return 0;
 +}
 +
 +static const struct snd_soc_dai_ops aw882xx_dai_ops = {
@@ -485,6 +554,10 @@ CPU DAI has started the port.
 +	/* -6 dB leaves headroom for a speaker the size of a watch's. */
 +	aw->volume = AW882XX_VOL_STEPS - 12;
 +	i2c_set_clientdata(i2c, aw);
++
++	ret = devm_work_autocancel(dev, &aw->start_work, aw882xx_start);
++	if (ret)
++		return ret;
 +
 +	aw->regmap = devm_regmap_init_i2c(i2c, &aw882xx_regmap_config);
 +	if (IS_ERR(aw->regmap))

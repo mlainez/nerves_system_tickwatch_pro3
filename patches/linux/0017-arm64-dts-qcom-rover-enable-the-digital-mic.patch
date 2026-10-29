@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Wed, 28 Oct 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: rover: enable the digital mic
+
+The watch's microphone is a digital mic on DMIC0 (gpio89 clock, gpio90
+data) into the SoC's own codec, which the ADSP reads on Tertiary MI2S.
+Enable lpass_codec, mux the DMIC pins, and add the Tertiary MI2S
+backend and a MultiMedia2 frontend for capture.
+---
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -237,6 +237,10 @@
+ 	/delete-node/ opp-2016000000;
+ };
+ 
++&lpass_codec {
++	status = "okay";
++};
++
+ &mdss {
+ 	status = "okay";
+ };
+@@ -516,10 +520,13 @@
+ 
+ &sound {
+ 	model = "mobvoi-rover";
+-	pinctrl-0 = <&quat_mi2s_default>;
+-	pinctrl-1 = <&quat_mi2s_sleep>;
++	pinctrl-0 = <&cdc_dmic_default>, <&quat_mi2s_default>;
++	pinctrl-1 = <&cdc_dmic_sleep>, <&quat_mi2s_sleep>;
+ 	pinctrl-names = "default", "sleep";
+-	audio-routing = "MM_DL1", "MultiMedia1 Playback";
++	audio-routing =
++		"DMIC1", "Digital Mic1",
++		"MM_DL1", "MultiMedia1 Playback",
++		"MultiMedia2 Capture", "MM_UL2";
+ 	status = "okay";
+ 
+ 	mm1-dai-link {
+@@ -530,6 +537,31 @@
+ 		};
+ 	};
+ 
++	mm2-dai-link {
++		link-name = "MultiMedia2";
++
++		cpu {
++			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
++		};
++	};
++
++	/* The digital mic, on DMIC0 into the SoC's codec. */
++	tertiary-mi2s-dai-link {
++		link-name = "Tertiary MI2S";
++
++		cpu {
++			sound-dai = <&q6afedai TERTIARY_MI2S_TX>;
++		};
++
++		platform {
++			sound-dai = <&q6routing>;
++		};
++
++		codec {
++			sound-dai = <&lpass_codec 1>;
++		};
++	};
++
+ 	quaternary-mi2s-dai-link {
+ 		link-name = "Quaternary MI2S";
+ 
+@@ -586,6 +618,29 @@
+ 		bias-disable;
+ 	};
+ 
++	cdc_dmic_default: cdc-dmic-default-state {
++		clk-pins {
++			pins = "gpio89";
++			function = "dmic0_clk";
++			drive-strength = <8>;
++			bias-disable;
++		};
++
++		data-pins {
++			pins = "gpio90";
++			function = "dmic0_data";
++			drive-strength = <8>;
++			bias-disable;
++		};
++	};
++
++	cdc_dmic_sleep: cdc-dmic-sleep-state {
++		pins = "gpio89", "gpio90";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-down;
++	};
++
+ 	quat_mi2s_default: quat-mi2s-default-state {
+ 		pins = "gpio12", "gpio13", "gpio94", "gpio95";
+ 		function = "sec_mi2s";

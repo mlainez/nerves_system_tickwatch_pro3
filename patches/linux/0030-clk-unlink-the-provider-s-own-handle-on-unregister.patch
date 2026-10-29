@@ -1,0 +1,35 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] clk: unlink the provider's own handle on unregister
+
+__clk_register() links hw->clk into core->clks along with the
+consumers' handles (its error path unlinks it again), but
+clk_unregister() frees it without unlinking it. As long as no consumer
+holds the core that does no harm: the core goes with it. When one does,
+the core outlives the handle and its list points into freed memory,
+which clk_core_get_boundaries() walks on the next clk_set_rate().
+
+On the watch the codec holds the ADSP's q6afe clocks. Stopping the ADSP
+unregisters them, and when it came back the sound card's re-probe set
+the codec's mclk rate and oopsed at a list-poisoned address, with
+prepare_lock held, which wedged the system.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/drivers/clk/clk.c
++++ b/drivers/clk/clk.c
+@@ -4593,6 +4593,13 @@ void clk_unregister(struct clk *clk)
+ 	if (clk->core->protect_count)
+ 		pr_warn("%s: unregistering protected clock: %s\n",
+ 					__func__, clk->core->name);
++
++	/*
++	 * __clk_register() linked the provider's own handle in with the
++	 * consumers'. A consumer may keep the core alive past this point and
++	 * walk that list, so take the handle off it before freeing it.
++	 */
++	clk_core_unlink_consumer(clk);
+ 	clk_prepare_unlock();
+ 
+ 	kref_put(&clk->core->ref, __clk_release);
+-- 
+2.43.0

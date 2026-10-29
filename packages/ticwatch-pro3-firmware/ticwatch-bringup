@@ -142,6 +142,10 @@ fi
 # Audio. The ADSP runs Qualcomm's stock audio firmware, which ships on the
 # FAT-formatted NON-HLOS partition alongside the modem's. The speaker
 # amplifier's board register file, when present, is on /vendor.
+#
+# /root/.no-adsp leaves the ADSP unbooted, for measuring power without it:
+# once booted it stays awake and holds XO on.
+NO_ADSP=/root/.no-adsp
 MODEM_PARTNAMES="modem modem_a apnhlos"
 MODEM_MNT=/mnt/modem
 
@@ -158,7 +162,9 @@ find_partition() {
 	return 1
 }
 
-if modem=$(find_partition "$MODEM_PARTNAMES") &&
+if [ -e "$NO_ADSP" ]; then
+	log "$NO_ADSP present; not staging the ADSP firmware, there will be no audio"
+elif modem=$(find_partition "$MODEM_PARTNAMES") &&
 	mount -t vfat -o ro,nodev,noexec,nosuid,shortname=lower "$modem" "$MODEM_MNT"; then
 	found_adsp=0
 	for f in "$MODEM_MNT"/image/adsp.* "$MODEM_MNT"/adsp.*; do
@@ -221,22 +227,30 @@ for mod in zinitix brcmfmac hci_uart nanohub qcom_q6v5_pas; do
 	fi
 done
 
-# The only playback route on this watch is MultiMedia1 (PCM device 0) into
-# the quinary MI2S port that feeds the speaker amplifier. The card appears
-# only after the ADSP has booted, so set the route from the background
-# rather than delay Erlang for it.
-(
-	i=0
-	while [ "$i" -lt 60 ]; do
-		if amixer -q -c 0 cset name='QUIN_MI2S_RX Audio Mixer MultiMedia1' 1 2>/dev/null; then
-			log "speaker route enabled"
-			exit 0
-		fi
-		sleep 1
-		i=$((i + 1))
-	done
-	log "no sound card after 60 s; speaker route not set"
-) >/dev/null 2>&1 &
+# The playback route is MultiMedia1 (PCM device 0) into the Quaternary
+# MI2S port that feeds the speaker amplifier; the capture route is the
+# digital mic on Tertiary MI2S into MultiMedia2 (PCM device 1). The card
+# appears only after the ADSP has booted, so set the routes from the
+# background rather than delay Erlang for it.
+if [ ! -e "$NO_ADSP" ]; then
+	(
+		i=0
+		while [ "$i" -lt 60 ]; do
+			if amixer -q -c 0 cset name='QUAT_MI2S_RX Audio Mixer MultiMedia1' 1 2>/dev/null; then
+				log "speaker route enabled"
+				if amixer -q -c 0 cset name='MultiMedia2 Mixer TERT_MI2S_TX' 1 2>/dev/null; then
+					log "microphone route enabled"
+				else
+					log "could not set the microphone route"
+				fi
+				exit 0
+			fi
+			sleep 1
+			i=$((i + 1))
+		done
+		log "no sound card after 60 s; audio routes not set"
+	) >/dev/null 2>&1 &
+fi
 
 # SDIO probes asynchronously. Do not delay Erlang waiting for wlan0:
 # VintageNet handles the interface appearing later. Applications should set

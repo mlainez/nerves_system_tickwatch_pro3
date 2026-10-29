@@ -97,5 +97,5 @@ CONFIG_DEBUG_INFO_NONE=y
 CONFIG_DRM_MSM_DSI_12NM_PHY=y
 CONFIG_DRM_PANEL_MOBVOI_ROVER=m
 
-# Speaker: the AW882xx amplifier fed from LPASS quinary MI2S.
+# Speaker: the AW882xx amplifier fed from LPASS Quaternary MI2S.
 CONFIG_SND_SOC_AW882XX=m

@@ -1,0 +1,58 @@
+From bdebf517ec112490fbe4cc8bb27351e52a059e0c Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Tue, 13 Oct 2026 18:03:09 +0200
+Subject: [PATCH] ASoC: qcom: apq8016_sbc: clock Quaternary MI2S by clock ID
+
+On SDM429W, Quaternary MI2S goes out on the sec_mi2s pins to the speaker
+amp. Enabling its bit clock with LPAIF_BIT_CLK succeeds, but the ADSP
+never drives the clock and playback stalls with -EIO. Set it with
+Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT, as the downstream machine driver
+does, and the port runs.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ sound/soc/qcom/apq8016_sbc.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/qcom/apq8016_sbc.c b/sound/soc/qcom/apq8016_sbc.c
+index 809fa15..8f0e012 100644
+--- a/sound/soc/qcom/apq8016_sbc.c
++++ b/sound/soc/qcom/apq8016_sbc.c
+@@ -200,6 +200,15 @@ static int msm8916_qdsp6_dai_init(struct snd_soc_pcm_runtime *rtd)
+ 	return apq8016_dai_init(rtd, qdsp6_dai_get_lpass_id(cpu_dai));
+ }
+ 
++/*
++ * The ADSP on SDM429W only clocks Quaternary MI2S, the external one on the
++ * sec_mi2s pins, when its bit clock is set with the clock ID API.
++ */
++static int msm8916_qdsp6_bit_clk(int mi2s)
++{
++	return mi2s == MI2S_QUATERNARY ? Q6AFE_LPASS_CLK_ID_QUAD_MI2S_IBIT : LPAIF_BIT_CLK;
++}
++
+ static int msm8916_qdsp6_startup(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+@@ -215,7 +224,8 @@ static int msm8916_qdsp6_startup(struct snd_pcm_substream *substream)
+ 	if (++data->mi2s_clk_count[mi2s] > 1)
+ 		return 0;
+ 
+-	ret = snd_soc_dai_set_sysclk(cpu_dai, LPAIF_BIT_CLK, MI2S_BCLK_RATE, 0);
++	ret = snd_soc_dai_set_sysclk(cpu_dai, msm8916_qdsp6_bit_clk(mi2s),
++				     MI2S_BCLK_RATE, 0);
+ 	if (ret)
+ 		dev_err(card->dev, "Failed to enable LPAIF bit clk: %d\n", ret);
+ 	return ret;
+@@ -236,7 +246,7 @@ static void msm8916_qdsp6_shutdown(struct snd_pcm_substream *substream)
+ 	if (--data->mi2s_clk_count[mi2s] > 0)
+ 		return;
+ 
+-	ret = snd_soc_dai_set_sysclk(cpu_dai, LPAIF_BIT_CLK, 0, 0);
++	ret = snd_soc_dai_set_sysclk(cpu_dai, msm8916_qdsp6_bit_clk(mi2s), 0, 0);
+ 	if (ret)
+ 		dev_err(card->dev, "Failed to disable LPAIF bit clk: %d\n", ret);
+ }
+-- 
+2.53.0
+

@@ -3,14 +3,23 @@ From: Nerves TicWatch Pro 3 maintainers <noreply@example.com>
 Date: Tue, 27 Oct 2026 00:00:00 +0000
 Subject: [PATCH] arm64: dts: qcom: rover: enable the speaker
 
-The speaker amplifier sits on BLSP1 I2C2 and takes I2S from LPASS
-quinary MI2S, which the downstream rover-audio.dtsi routes to the
-pri_mi2s pins gpio85-88. There is no analog codec on PM660, so the
-whole playback path is MultiMedia1 -> QUIN_MI2S_RX -> amplifier.
+The speaker amplifier sits on BLSP1 I2C2 at 0x34 and takes I2S from
+LPASS Quaternary MI2S, on SD0 of the sec_mi2s pins gpio12, gpio13,
+gpio94 and gpio95. That is how the stock device tree routes it:
+qcom,msm-ext-pa = "quaternary", with QUAT_MI2S_RX in its audio
+routing. There is no analog codec on PM660, so the whole playback path
+is MultiMedia1 -> QUAT_MI2S_RX -> amplifier.
+
+As on stock, the amplifier is powered from PM660 L11 fixed at 1.8 V,
+held in reset by gpio92 and signals on gpio93.
+
+The stock ADSP image spans 21 MiB once its uninitialised segments are
+counted, more than msm8937's 17 MiB adsp_mem region, so make the region
+24 MiB.
 ---
 --- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
 +++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
-@@ -127,6 +127,33 @@
+@@ -127,6 +127,38 @@
  	};
  };
  
@@ -18,7 +27,12 @@ whole playback path is MultiMedia1 -> QUIN_MI2S_RX -> amplifier.
 +	status = "okay";
 +};
 +
++/*
++ * The stock ADSP image spans 21 MiB once its uninitialised segments are
++ * counted, more than msm8937's 17 MiB region.
++ */
 +&adsp_mem {
++	size = <0x0 0x1800000>;
 +	status = "okay";
 +};
 +
@@ -44,14 +58,42 @@ whole playback path is MultiMedia1 -> QUIN_MI2S_RX -> amplifier.
  &blsp1_i2c4 {
  	status = "okay";
  
-@@ -473,6 +500,39 @@
+@@ -278,6 +310,14 @@
+ 	status = "okay";
+ };
+ 
++/* The amplifier's I2S data is on SD0 of the sec_mi2s pins. */
++&q6afedai {
++	dai@22 {
++		reg = <QUATERNARY_MI2S_RX>;
++		qcom,sd-lines = <0>;
++	};
++};
++
+ &rpm_requests {
+ 	regulators-0 {
+ 		compatible = "qcom,rpm-pm660-regulators";
+@@ -373,9 +413,10 @@
+ 			regulator-allow-set-load;
+ 		};
+ 
++		/* The speaker amplifier's supply, fixed at 1.8 V as on stock. */
+ 		pm660_l11: l11 {
+-			regulator-min-microvolt = <1200000>;
+-			regulator-max-microvolt = <2040000>;
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
+ 			regulator-enable-ramp-delay = <250>;
+ 			regulator-ramp-delay = <0>;
+ 		};
+@@ -473,6 +514,39 @@
  	clock-frequency = <32768>;
  };
  
 +&sound {
 +	model = "mobvoi-rover";
-+	pinctrl-0 = <&quin_mi2s_default>;
-+	pinctrl-1 = <&quin_mi2s_sleep>;
++	pinctrl-0 = <&quat_mi2s_default>;
++	pinctrl-1 = <&quat_mi2s_sleep>;
 +	pinctrl-names = "default", "sleep";
 +	audio-routing = "MM_DL1", "MultiMedia1 Playback";
 +	status = "okay";
@@ -64,11 +106,11 @@ whole playback path is MultiMedia1 -> QUIN_MI2S_RX -> amplifier.
 +		};
 +	};
 +
-+	quinary-mi2s-dai-link {
-+		link-name = "Quinary MI2S";
++	quaternary-mi2s-dai-link {
++		link-name = "Quaternary MI2S";
 +
 +		cpu {
-+			sound-dai = <&q6afedai QUINARY_MI2S_RX>;
++			sound-dai = <&q6afedai QUATERNARY_MI2S_RX>;
 +		};
 +
 +		platform {
@@ -84,40 +126,22 @@ whole playback path is MultiMedia1 -> QUIN_MI2S_RX -> amplifier.
  &spmi_bus {
  	pmic@0 {
  		pm660_fg: fuel-gauge@4000 {
-@@ -512,6 +572,45 @@
+@@ -512,6 +586,27 @@
  		bias-disable;
  	};
  
-+	quin_mi2s_default: quin-mi2s-default-state {
-+		data-pins {
-+			pins = "gpio85", "gpio86", "gpio88";
-+			function = "pri_mi2s";
-+			drive-strength = <8>;
-+			bias-disable;
-+		};
-+
-+		ws-pins {
-+			pins = "gpio87";
-+			function = "pri_mi2s_ws";
-+			drive-strength = <8>;
-+			bias-disable;
-+		};
++	quat_mi2s_default: quat-mi2s-default-state {
++		pins = "gpio12", "gpio13", "gpio94", "gpio95";
++		function = "sec_mi2s";
++		drive-strength = <8>;
++		bias-disable;
 +	};
 +
-+	quin_mi2s_sleep: quin-mi2s-sleep-state {
-+		data-pins {
-+			pins = "gpio85", "gpio86", "gpio88";
-+			function = "pri_mi2s";
-+			drive-strength = <2>;
-+			bias-pull-down;
-+		};
-+
-+		ws-pins {
-+			pins = "gpio87";
-+			function = "pri_mi2s_ws";
-+			drive-strength = <2>;
-+			bias-pull-down;
-+		};
++	quat_mi2s_sleep: quat-mi2s-sleep-state {
++		pins = "gpio12", "gpio13", "gpio94", "gpio95";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-down;
 +	};
 +
 +	speaker_amp_default: speaker-amp-default-state {
