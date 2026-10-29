@@ -5,6 +5,7 @@ BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
 BR2_TOOLCHAIN_EXTERNAL_DOWNLOAD=y
 BR2_TOOLCHAIN_EXTERNAL_URL="https://github.com/nerves-project/toolchains/releases/download/v15.3.1/nerves_toolchain_aarch64_nerves_linux_gnu-linux_${shell uname -m}-15.3.1-C0D130A.tar.xz"
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="aarch64-nerves-linux-gnu"
+BR2_TOOLCHAIN_EXTERNAL_GCC_15=y
 BR2_TOOLCHAIN_EXTERNAL_HEADERS_6_0=y
 BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
 # BR2_TOOLCHAIN_EXTERNAL_INET_RPC is not set
@@ -147,6 +148,23 @@ BR2_TARGET_ROOTFS_SQUASHFS=y
 BR2_TARGET_ROOTFS_SQUASHFS4_LZ4=y
 # BR2_TARGET_ROOTFS_EXT2 is not set
 # BR2_TARGET_ROOTFS_TAR is not set
+
+# GPU userspace: Mesa3D / Freedreno for the Adreno 504 (a5xx, run as a
+# 505; see patches/linux/0015). GLES, EGL and GBM through the gallium
+# freedreno driver, the stack Emerge's DRM backend presents through (see
+# hello_watch's UI.md). Same set as nerves_system_fp3. No Vulkan (turnip is
+# a6xx+) and no OpenCL (Rusticl would pull in clang and LLVM).
+BR2_PACKAGE_MESA3D=y
+BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_FREEDRENO=y
+BR2_PACKAGE_MESA3D_OPENGL_ES=y
+BR2_PACKAGE_MESA3D_OPENGL_EGL=y
+BR2_PACKAGE_MESA3D_GBM=y
+# Emerge's rust-skia NIF links these directly. Keep them explicit rather
+# than relying on Mesa to select them.
+BR2_PACKAGE_LIBDRM=y
+BR2_PACKAGE_LIBDRM_FREEDRENO=y
+BR2_PACKAGE_FONTCONFIG=y
+BR2_PACKAGE_FREETYPE=y
 
 # This system's own packages — see packages/README.md.
 BR2_PACKAGE_CITRONICS_INITRAMFS=y

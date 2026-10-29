@@ -1,0 +1,42 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] clk: qcom: rcg2: keep a floor clock's configuration when it gives the rate
+
+When a parent's rate changes, clk_change_rate() calls set_rate on each
+child with the rate its current configuration gives from the parent's
+new rate. A floor RCG looks that rate up rounding down, and it is rarely
+a table frequency: GPLL0 on msm8937 recalculates to 799999792 Hz, so
+SDCC2's 50 MHz is 49999987 Hz, and the floor lookup takes the 25 MHz
+entry. The next cascade takes 20 MHz, then the 400 kHz XO entry, where
+it stays, with the core still believing it runs from GPLL0.
+
+The GPU's gfx3d_clk_src sets its parent's rate (CLK_SET_RATE_PARENT), and
+asks for GPLL0 at its nominal 800 MHz, so every GPU runtime suspend and
+resume cascades through GPLL0's children. On the watch that left the
+Wi-Fi's SDIO bus at 400 kHz within seconds of boot, a ~1 Mbit/s ceiling.
+
+Asked for the rate its configuration already gives, a floor RCG now
+keeps that configuration.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/drivers/clk/qcom/clk-rcg2.c
++++ b/drivers/clk/qcom/clk-rcg2.c
+@@ -689,6 +689,18 @@ static int clk_rcg2_set_gp_rate(struct c
+ static int clk_rcg2_set_floor_rate(struct clk_hw *hw, unsigned long rate,
+ 				   unsigned long parent_rate)
+ {
++	/*
++	 * A parent's rate change re-sets each child at the rate its
++	 * configuration gives from the parent's new rate. That rate is
++	 * rarely a table frequency (a PLL that's a few hundred Hz off its
++	 * nominal rate makes 50 MHz 49999987 Hz), and the floor lookup
++	 * would take the entry below it, so every such cascade would slow
++	 * the clock another step. The configuration already gives this
++	 * rate: keep it.
++	 */
++	if (rate == clk_rcg2_recalc_rate(hw, parent_rate))
++		return 0;
++
+ 	return __clk_rcg2_set_rate(hw, rate, FLOOR);
+ }
+ 

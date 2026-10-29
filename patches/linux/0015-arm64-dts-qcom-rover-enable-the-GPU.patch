@@ -1,0 +1,64 @@
+From 4beb97d57407a60f426de546464d114eadc375c3 Mon Sep 17 00:00:00 2001
+From: Lars Wikman <lars@underjord.io>
+Date: Mon, 12 Oct 2026 17:55:22 +0000
+Subject: [PATCH] arm64: dts: qcom: rover: enable the GPU
+
+The SDM429W has an Adreno 504, which neither the msm driver nor Mesa
+list. It is a cut-down 505 with the same microcode and GMEM, so describe
+it as the 505 that msm8937.dtsi already has. Like msm8937, it needs no
+zap shader.
+
+Stock runs the GPU at 320 MHz or 19.2 MHz only. The SDM429 clock plan
+has no 300 MHz step: the clock rounds it to 320 MHz, which then has no
+OPP, and every frequency change fails. Replace the msm8937 OPPs above
+19.2 MHz with stock's 320 MHz, at the nominal corner msm8937 uses for its
+next step up.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../boot/dts/qcom/sdm429w-mobvoi-rover.dts      | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+index 3bf5983..ea2467c 100644
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -205,6 +205,35 @@ &cpu_opp_table_c1 {
+ 	/delete-node/ opp-2016000000;
+ };
+ 
++/*
++ * The SDM429W has an Adreno 504, which neither the msm driver nor Mesa list.
++ * It is a cut-down 505 (same microcode and GMEM), so it is described as the
++ * 505 msm8937.dtsi already has. No zap shader: like msm8937, the secure world
++ * doesn't need one.
++ *
++ * Stock runs it at 320 MHz or 19.2 MHz only. The SDM429 clock plan has no
++ * 300 MHz step (the clock rounds it to 320 MHz, which then has no OPP), so
++ * the msm8937 OPPs above 19.2 MHz are replaced with stock's 320 MHz, at the
++ * nominal corner msm8937 uses for its next step up.
++ */
++&gpu {
++	status = "okay";
++};
++
++&gpu_opp_table {
++	/delete-node/ opp-216000000;
++	/delete-node/ opp-300000000;
++	/delete-node/ opp-375000000;
++	/delete-node/ opp-400000000;
++	/delete-node/ opp-450000000;
++
++	opp-320000000 {
++		opp-hz = /bits/ 64 <320000000>;
++		opp-supported-hw = <0xff>;
++		required-opps = <&rpmpd_opp_nom>;
++	};
++};
++
+ &mdss {
+ 	status = "okay";
+ };
+-- 
+2.43.0
+

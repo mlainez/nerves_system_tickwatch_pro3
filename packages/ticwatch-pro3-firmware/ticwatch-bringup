@@ -139,6 +139,22 @@ else
 	log "no Bluetooth .hcd found; the controller will run unpatched firmware"
 fi
 
+# The GPU's microcode is Qualcomm's and isn't redistributable, so it isn't in
+# the rootfs either; stock keeps it on /vendor. The msm driver asks for
+# qcom/a530_pm4.fw and qcom/a530_pfp.fw (the Adreno 504 runs as a 505, which
+# uses the A530 microcode) when it binds the GPU, after this script.
+GPU_FW="a530_pm4.fw a530_pfp.fw"
+mkdir -p "$FWDIR/qcom"
+for n in $GPU_FW; do
+	if fw=$(find_file "$n"); then
+		log "GPU microcode: $fw"
+		ln -sf "$fw" "$FWDIR/qcom/$n"
+		found_any=1
+	else
+		log "no $n found; the GPU will not start"
+	fi
+done
+
 if [ "$found_any" = "1" ]; then
 	if [ -w "$PARAM" ]; then
 		printf "%s" "$FWDIR" > "$PARAM"
