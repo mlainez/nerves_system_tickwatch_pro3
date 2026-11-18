@@ -144,6 +144,23 @@ read-only `system` and `vendor` partitions; nothing proprietary is
 shipped. `gpsctl stream` prints JSON events; `gpsctl stop|status|logs`
 manage it. GPS stays off until started.
 
+**Video:** Venus, the SoC's video codec, needs firmware the watch
+doesn't carry, and none is redistributable, so the system ships none.
+Without it there is no hardware decoder, no `/dev/video*`, and so no
+video. The watch's TrustZone runs the Moto G5S's; to build that into your
+app's firmware, run this in the app before `mix firmware`:
+
+```sh
+MIX_TARGET=ticwatch_pro3 mix ticwatch.fetch_motorola_firmware
+```
+
+It downloads the files from a public dump of that phone's firmware at a
+pinned commit, checks their hashes and writes them to `lib/firmware` in
+the app's rootfs overlay. They are Qualcomm's and Motorola's and not
+licensed for redistribution: keep them out of git (the task warns if they
+aren't ignored) and don't pass on images built with them. Files in
+`/root/firmware` on the watch take precedence, for trying other firmware.
+
 **Clock:** Linux cannot set the PMIC RTC. Apps keep time across reboots
 by storing an offset, as `hello_watch`'s `HelloWatch.PmicRtc` does.
 

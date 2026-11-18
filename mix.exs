@@ -28,8 +28,9 @@ defmodule NervesSystemTicwatchPro3.MixProject do
     ]
   end
 
+  # Only for mix ticwatch.fetch_motorola_firmware, which runs on the host.
   def application do
-    []
+    [extra_applications: [:crypto, :inets, :public_key, :ssl]]
   end
 
   defp bootstrap(args) do
@@ -90,7 +91,7 @@ defmodule NervesSystemTicwatchPro3.MixProject do
 
   defp package do
     [
-      files: package_files(),
+      files: package_files() ++ ["lib"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
     ]
