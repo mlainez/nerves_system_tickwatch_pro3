@@ -1,0 +1,30 @@
+From: Lars Wikman <lars@underjord.io>
+Subject: [PATCH] arm64: dts: qcom: rover: keep crash logs in ramoops
+
+Reserve a megabyte for pstore's RAM backend, so the kernel log, a panic
+and userspace's pmsg records (erlinit's breadcrumbs) survive a reset and
+show up in /sys/fs/pstore on the next boot. The layout is the msm8953
+phones' (msm8953-xiaomi-tissot); the region is ordinary RAM here.
+
+Signed-off-by: Lars Wikman <lars@underjord.io>
+---
+--- a/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
++++ b/arch/arm64/boot/dts/qcom/sdm429w-mobvoi-rover.dts
+@@ -86,6 +86,15 @@
+ 			reg = <0x0 0x90001000 0x0 (454 * 454 * 3)>;
+ 			no-map;
+ 		};
++
++		ramoops@9ff00000 {
++			compatible = "ramoops";
++			reg = <0x0 0x9ff00000 0x0 0x00100000>;
++			record-size = <0x1000>;
++			console-size = <0x80000>;
++			ftrace-size = <0x1000>;
++			pmsg-size = <0x8000>;
++		};
+ 	};
+ 
+ 	wifi_vqmmc: wifi-vqmmc-regulator {
+-- 
+2.43.0
