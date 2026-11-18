@@ -189,6 +189,36 @@ from a local kernel tree, copy `local.mk.example` to `local.mk`. After
 changing patches, re-extract the kernel source: Buildroot does not undo
 applied patches.
 
+## Work-in-progress builds
+
+CI (`.github/workflows/ci.yml`) builds the system on every push, with
+[`redwirelabs/build-nerves-system-action`](https://github.com/redwirelabs/build-nerves-system-action),
+and keeps the artifact on the run. To try a build on hardware without
+building it yourself, give it a prerelease version and tag it:
+
+```sh
+echo 0.3.0-wip-1 > VERSION
+git commit -am "Version 0.3.0-wip-1"
+git tag v0.3.0-wip-1
+git push origin HEAD v0.3.0-wip-1
+```
+
+CI then releases the artifact under the tag, as a prerelease, and an app
+picks it up like any other release:
+
+```elixir
+{:nerves_system_tickwatch_pro3,
+ github: "lawik/nerves_system_tickwatch_pro3",
+ tag: "v0.3.0-wip-1",
+ runtime: false,
+ targets: :ticwatch_pro3}
+```
+
+The tag must match `VERSION`, as Nerves looks for the artifact of
+version X under tag vX; CI refuses one that doesn't. A tag without a
+prerelease part (`v0.3.0`) is released as a draft instead, to check before
+publishing.
+
 ## Acknowledgements
 
 The mainline port is [NekoCWD](https://github.com/NekoCWD)'s work: the

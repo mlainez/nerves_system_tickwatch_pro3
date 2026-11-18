@@ -1,0 +1,66 @@
+name: CI
+
+# Every push builds the system. A tag also releases the artifact under that
+# tag, which is where Nerves looks for it (see "Work-in-progress builds" in
+# the README): a prerelease version such as v0.3.0-wip-1 is published as a
+# prerelease, so apps can fetch it straight away, and a release version as a
+# draft, to check before publishing.
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    outputs:
+      artifact_filename: ${{ steps.nerves.outputs.artifact_filename }}
+    steps:
+      # The Buildroot tree alone is about 12 GB, before downloads and ccache.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v7
+      - name: Build
+        id: nerves
+        uses: redwirelabs/build-nerves-system-action@v1
+
+  release:
+    runs-on: ubuntu-24.04
+    needs: build
+    if: github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@v7
+      # Nerves fetches the artifact for version X from tag vX.
+      - name: Check the tag matches VERSION
+        run: |
+          version=$(cat VERSION)
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match VERSION ${version}"
+            exit 1
+          fi
+      - name: Fetch artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_filename }}
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ needs.build.outputs.artifact_filename }}
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-*) kind=--prerelease ;;
+            *) kind=--draft ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" "${ARTIFACT}" \
+            --verify-tag --title "${GITHUB_REF_NAME}" "${kind}"

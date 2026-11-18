@@ -43,7 +43,10 @@ defmodule NervesSystemTicwatchPro3.MixProject do
     [
       type: :system,
       artifact_sites: [
-        {:github_releases, "#{@github_organization}/#{@app}"}
+        {:github_releases, "#{@github_organization}/#{@app}"},
+        # Work-in-progress builds, released by CI on lawik's fork (see the
+        # README).
+        {:github_releases, "lawik/#{@app}"}
       ],
       build_runner_opts: build_runner_opts(),
       platform: Nerves.System.BR,
